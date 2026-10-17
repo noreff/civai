@@ -1902,8 +1902,12 @@ def techNames(ts):
 def sealLine(n, r):
 	s = "#%s with %s (turn %s, %s): we gave %s; we got %s" % (n, pname(r["with"]), r.get("turn"), r.get("how"),
 		", ".join(r["we_gave"]) or "nothing", ", ".join(r["we_got"]) or "nothing")
-	if r.get("permanent"):
-		s = s + "; can't be undone: " + ", ".join(r["permanent"])
+	peace = [x for x in r.get("permanent") or [] if x.startswith("peace")]
+	other = [x for x in r.get("permanent") or [] if not x.startswith("peace")]
+	if peace:
+		s = s + "; " + ", ".join(peace) + " (reject = war again)"
+	if other:
+		s = s + "; can't be undone: " + ", ".join(other)
 	return s
 
 def cmdRatify(args):
