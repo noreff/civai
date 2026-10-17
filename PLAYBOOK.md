@@ -15,7 +15,7 @@ The `civ` tool is `~/civai/civ`. `civ help` lists every command. Start a game se
 
 - You know only what your civilization knows. Every `civ` command except `civ py` is already limited to that (fog of war).
 - `civ py` runs code inside the game and sees everything. Use it only to:
-  - give orders to your own civ that have no proper command yet (unit actions other than `civ move`, civics, diplomacy). Research and city builds have real commands now: `civ research`, `civ build`;
+  - give orders to your own civ that have no proper command yet (civics, sliders, diplomacy). Research, city builds and unit actions have real commands: `civ research`, `civ build`, `civ actions` + `civ do` (found cities, worker jobs, fortify, promote, upgrade, automate...);
   - read the game's rules (tech tree, costs, unit stats).
   Never use it to look at other players' units, cities, gold, techs or plans beyond what `civ player` shows.
 - Don't take game rules from memory: check them in the game (`civ py` on `gc.getTechInfo(...)` etc.). Example: in BtS, Alphabet needs Writing; tech trading needs Alphabet.
@@ -33,7 +33,7 @@ The game always waits for you: the human can't end a turn until you say `civ rea
 Rules of thumb:
 - Most wake-ups need a few commands, not a deep analysis. Think deeply on big events: contact, war, a city lost or taken, a deal offered, every review turn.
 - Look at the land before land decisions (claims, city sites, borders, wars): `civ area X Y [R]` is a text map with resources, borders, foreign units and the best city sites the game rates. One look beats many `civ tile` calls.
-- The built-in AI runs everything you don't take over. Take over what matters: research, key builds, units with a purpose (`civ move` / `civ claim`), war and peace.
+- The built-in AI runs everything you don't take over. Take over what matters: research, key builds, units with a purpose (`civ move`, `civ do`), war and peace. Settlers and workers are where words become land: pick the city site yourself (`civ area` → `civ move` → `civ do <id> FOUND`). A unit you gave a job wakes you when it's done (`unit_done`); `civ release <id>` hands it back to the built-in AI.
 - Keep promises. If you can't, say so in chat before breaking them.
 
 ## Agency: you are a player, not a referee

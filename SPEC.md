@@ -142,7 +142,7 @@ Each stage is a small piece: build → check together in the game → fix → mo
 | 0 | Eyes v0: world dump + schematic map | ✅ 2026-10-14 |
 | 1 | Bridge: mailbox, `civ ping`, `civ status` | ✅ 2026-10-14: ~50 ms replies, also in the background (see "Pitfalls") |
 | 2 | Look on request: `map`, `tile`, `city`, `unit`, `player`, `events` | ✅ 2026-10-14 |
-| 3 | Buttons: `actions` + `do` for units and cities, research | ⏳ `move` exists; the general button list, cities and research are next. `civ py` covers dev needs meanwhile |
+| 3 | Buttons: `actions` + `do` for units and cities, research | ✅ 2026-10-15: `civ research`, `civ build` (city claims keep the queue), `civ actions` / `civ do` from the game's own action list, `civ area` text map with best city sites. Left: civics, sliders |
 | 4 | Taking over from the AI: `claim` / `release`; war and peace only by Claude's decision | ⏳ units ✅ (the scout stood by the cows); war/peace and cities are next |
 | 5 | Turn sync: `ready` | ✅ 2026-10-14: `cannotDoControl` blocks the human's End Turn until `civ ready`; `!go` in chat is the escape hatch; turn start and waiting wake Claude |
 | 6 | Wake-ups: events wake Claude | ✅ mostly: Monitor on `events.jsonl` (re-arm every 30 min); Claude wrote first on meeting the Khan. 2026-10-15: auto-ready on quiet turns (`civ gate auto on [N]`), wake only on `claude_wake` (with reasons), chat or a waiting player; `civ hold` |

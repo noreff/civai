@@ -9,6 +9,12 @@
   civ unit <id>            one of my units
   civ player <name|civ|id> a player I have met
   civ move <id> X Y        walk a unit to X Y (several turns if needed); the unit becomes Claude's
+  civ actions <unit id>    what the unit can do right now (the game's own buttons)
+  civ do <unit id> <action> [X Y] [--queue]
+                           do one: FORTIFY, SENTRY, FOUND, BUILD_FARM, BUILD_ROAD, PILLAGE,
+                           PROMOTE_COMBAT1, UPGRADE_..., AUTO_BUILD, AUTO_EXPLORE, ...;
+                           MOVE_TO / ROUTE_TO take X Y; the unit stays Claude's (AUTO_ hands
+                           it to the game's automation); a finished job wakes Claude (unit_done)
   civ area X Y [R]         text map of the region around X Y (radius R, default 6) with cities,
                            resources, foreign units, borders, and the best city sites there
   civ research [tech] [--queue]
@@ -96,6 +102,8 @@ def call(cmd, args=None, timeout=TIMEOUT):
 def short(t):
     if not t:
         return "-"
+    if t in ("ROUTE_TO",):   # an action name, not a route type
+        return t
     for p in ("UNIT_", "TECH_", "LEADER_", "ERA_", "RELIGION_", "ATTITUDE_", "BONUS_", "CIVIC_",
               "BUILDING_", "FEATURE_", "TERRAIN_", "IMPROVEMENT_", "ROUTE_", "SPECIALIST_", "PROJECT_",
               "PROCESS_", "CULTURELEVEL_", "GOODY_", "PROMOTION_"):
@@ -314,6 +322,16 @@ def main(argv):
             print(call("exec", {"code": " ".join(argv[1:]) if len(argv) > 1 else sys.stdin.read()})["value"])
         elif cmd == "ready":
             print(fmt_record(call("ready")))
+        elif cmd == "actions":
+            print(fmt_record(call("actions", {"id": int(argv[1])})))
+        elif cmd == "do":
+            words = [a for a in argv[1:] if not a.startswith("--")]
+            args = {"id": int(words[0]), "action": words[1]}
+            if len(words) > 3:
+                args["x"], args["y"] = int(words[2]), int(words[3])
+            if "--queue" in argv:
+                args["queue"] = True
+            print(fmt_record(call("do", args)))
         elif cmd == "area":
             xy = " ".join(argv[1:]).replace(",", " ").split()
             args = {"x": int(xy[0]), "y": int(xy[1])}

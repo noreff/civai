@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 20
+BRIDGE_VERSION = 21
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -807,6 +807,11 @@ def aiUnitUpdate(gu, argsList):
 		saveClaims(claims)
 		writeEvent("unit_arrived", {"id": u.getID(), "unit": gc.getUnitInfo(u.getUnitType()).getType(),
 			"x": u.getX(), "y": u.getY()})
+	elif claims[u.getID()].get("busy"):
+		claims[u.getID()]["busy"] = False
+		saveClaims(claims)
+		writeEvent("unit_done", {"id": u.getID(), "unit": gc.getUnitInfo(u.getUnitType()).getType(),
+			"x": u.getX(), "y": u.getY()})
 	g.pushMission(MissionTypes.MISSION_SKIP, -1, -1, 0, False, False, MissionAITypes.NO_MISSIONAI, u.plot(), u)
 	return 1
 
@@ -1094,6 +1099,115 @@ def cmdArea(args):
 		d["best_city_sites"] = ["(%d,%d) value %d, %d/21 tiles seen" % (x, y, v, n) for (v, x, y, n) in sites[:5]]
 	return d
 
+
+# ------------------------------------------------------------------ unit actions
+#
+# The same buttons a human sees for a unit, taken from the game's own action list
+# and checked with the game's own rules (canStartMission / canDoCommand / canAutomate).
+# Names: FORTIFY, SENTRY, FOUND, BUILD_FARM, PILLAGE, PROMOTE_COMBAT1, UPGRADE_KESHIK,
+# AUTO_BUILD, AUTO_EXPLORE, ... Targeted actions (MOVE_TO, ROUTE_TO, ...) take x y.
+
+TARGETED_MISSIONS = ("MISSION_MOVE_TO", "MISSION_ROUTE_TO", "MISSION_AIRLIFT", "MISSION_NUKE",
+	"MISSION_RECON", "MISSION_PARADROP", "MISSION_AIRBOMB", "MISSION_RANGE_ATTACK", "MISSION_AIRPATROL",
+	"MISSION_SEAPATROL", "MISSION_MOVE_TO_UNIT", "MISSION_ESPIONAGE")
+
+def actionName(a):
+	m, c, au = a.getMissionType(), a.getCommandType(), a.getAutomateType()
+	if m >= 0:
+		t = gc.getMissionInfo(m).getType()
+		if t == "MISSION_BUILD":
+			return gc.getBuildInfo(a.getMissionData()).getType()
+		return t[len("MISSION_"):]
+	if c >= 0:
+		t = gc.getCommandInfo(c).getType()[len("COMMAND_"):]
+		if t in ("HOTKEY", "AUTOMATE"):
+			return None   # interface internals; automation is offered as AUTO_* actions
+		if t == "PROMOTION":
+			return "PROMOTE_" + gc.getPromotionInfo(a.getCommandData()).getType()[len("PROMOTION_"):]
+		if t == "UPGRADE":
+			return "UPGRADE_" + gc.getUnitInfo(a.getCommandData()).getType()[len("UNIT_"):]
+		return t
+	if au >= 0:
+		return "AUTO_" + gc.getAutomateInfo(au).getType()[len("AUTOMATE_"):]
+	return None
+
+def unitActions(u):
+	# [(name, action info, needs target)] for what this unit can do right now
+	g = u.getGroup()
+	out = []
+	for i in range(gc.getNumActionInfos()):
+		a = gc.getActionInfo(i)
+		try:
+			name = actionName(a)
+		except:
+			name = None   # actions without data the game can show (e.g. a generic promotion entry)
+		if not name:
+			continue
+		m, c, au = a.getMissionType(), a.getCommandType(), a.getAutomateType()
+		try:
+			if m >= 0:
+				if gc.getMissionInfo(m).getType() in TARGETED_MISSIONS:
+					if gc.getMissionInfo(m).getType() in ("MISSION_MOVE_TO", "MISSION_ROUTE_TO") and u.canMove():
+						out.append((name, a, True))
+					continue
+				if g.canStartMission(m, a.getMissionData(), -1, u.plot(), False):
+					out.append((name, a, False))
+			elif c >= 0:
+				if u.canDoCommand(CommandTypes(c), a.getCommandData(), -1, False):
+					out.append((name, a, False))
+			elif au >= 0:
+				if g.canAutomate(AutomateTypes(au)):
+					out.append((name, a, False))
+		except:
+			pass
+	return out
+
+def cmdActions(args):
+	u = myUnit(args["id"])
+	acts = unitActions(u)
+	return {"id": u.getID(), "unit": gc.getUnitInfo(u.getUnitType()).getDescription(), "at": (u.getX(), u.getY()),
+		"moves_left": u.movesLeft() / gc.getMOVE_DENOMINATOR(),
+		"actions": [n for (n, a, t) in acts if not t], "with_target_x_y": [n for (n, a, t) in acts if t]}
+
+def cmdDo(args):
+	# do one of the unit's available actions; queue=true adds it after its current orders
+	u = myUnit(args["id"])
+	want = args["action"].strip().upper().replace(" ", "_")
+	acts = unitActions(u)
+	match = [x for x in acts if x[0] == want]
+	if not match:
+		raise Exception("%s #%d can't %s here now. It can: %s" % (gc.getUnitInfo(u.getUnitType()).getDescription(),
+			u.getID(), want, ", ".join([n for (n, a, t) in acts])))
+	name, a, targeted = match[0]
+	g = u.getGroup()
+	m, c, au = a.getMissionType(), a.getCommandType(), a.getAutomateType()
+	if targeted:
+		if not args.has_key("x"):
+			raise Exception("%s needs a target: civ do %d %s X Y" % (name, u.getID(), name))
+		if name == "MOVE_TO":
+			return cmdMove(args)
+		x, y = int(args["x"]), int(args["y"])
+		setClaim(u.getID(), None)
+		g.pushMission(MissionTypes(m), x, y, 0, bool(args.get("queue")), True, MissionAITypes.NO_MISSIONAI, CyMap().plot(x, y), u)
+	elif m >= 0:
+		c2 = loadClaims()
+		c2[u.getID()] = {"target": None, "busy": True}
+		saveClaims(c2)
+		g.pushMission(MissionTypes(m), a.getMissionData(), -1, 0, bool(args.get("queue")), True, MissionAITypes.NO_MISSIONAI, u.plot(), u)
+	elif c >= 0:
+		u.doCommand(CommandTypes(c), a.getCommandData(), -1)
+	else:
+		# automation hands the unit back to the game's own automation
+		c2 = loadClaims()
+		if c2.has_key(u.getID()):
+			del c2[u.getID()]
+			saveClaims(c2)
+		g.setAutomateType(AutomateTypes(au))
+	if u.isNone():
+		return {"id": args["id"], "done": name, "unit": "gone (used up, e.g. founded a city)"}
+	return {"id": u.getID(), "done": name, "at": (u.getX(), u.getY()), "moves_left": u.movesLeft() / gc.getMOVE_DENOMINATOR(),
+		"orders_queued": g.getLengthMissionQueue()}
+
 # ------------------------------------------------------- orders: research, builds
 #
 # The player's own decisions, checked by the game's rules (canResearch, canTrain...)
@@ -1265,7 +1379,7 @@ def setReady(byWhom):
 
 ATTENTION_KINDS = ("first_contact", "war_declared", "peace_made", "city_founded", "city_changed_hands",
 	"city_razed", "combat", "tech_learned", "building_built", "project_built", "religion_founded",
-	"great_person", "golden_age", "unit_arrived")
+	"great_person", "golden_age", "unit_arrived", "unit_done")
 
 def noteAttention(kind):
 	g = readGate()
@@ -1432,6 +1546,8 @@ COMMANDS = {
 	"move": cmdMove,
 	"research": cmdResearch,
 	"area": cmdArea,
+	"actions": cmdActions,
+	"do": cmdDo,
 	"build": cmdBuild,
 	"ping": cmdPing,
 	"status": cmdStatus,
