@@ -166,3 +166,4 @@ Each stage is a small piece: build → check together in the game → fix → mo
 3. Bug: first contact is logged twice (first as "an unknown civilization").
 4. Rule for the skill: take the tech tree and rules from the game's XML / API, not from memory.
 5. Skill `civ4-player` (stage 8).
+6. Bug (2026-10-15): Mongolia's research was set to Animal Husbandry on T21, progressed T21-24 (67/360), then was empty (-1) on T25 with no event explaining it. Cause unknown; `claude_wake` now includes `research_idle` so it can't silently waste turns.

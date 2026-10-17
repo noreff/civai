@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 13
+BRIDGE_VERSION = 14
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1061,6 +1061,9 @@ def autoReadyOrWake(turn):
 	enemies = enemiesNear()
 	if enemies:
 		reasons.append("enemy_near: " + "; ".join(enemies[:5]))
+	me = gc.getPlayer(myIds()[0])
+	if me.getCurrentResearch() < 0 and me.getNumCities() > 0:
+		reasons.append("research_idle")
 	every = int(g.get("review_every") or 5)
 	if every > 0 and turn % every == 0:
 		reasons.append("review")
