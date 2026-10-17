@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 12
+BRIDGE_VERSION = 13
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -640,6 +640,8 @@ def writeEvent(kind, d):
 	d["kind"] = kind
 	d["time"] = time.strftime("%H:%M:%S")
 	ensureDir()
+	if kind in ATTENTION_KINDS:
+		noteAttention(kind)
 	f = open(EVENTS_FILE, "ab")
 	try:
 		f.write(toJson(d) + "\n")
@@ -671,6 +673,7 @@ def recordEvent(tag, a):
 	elif tag == "BeginPlayerTurn" and gc.getPlayer(a[1]).isHuman():
 		# fired before the game turn counter moves on: the player is about to play turn a[0] + 1
 		writeEvent("player_turn_begins", {"gate": readGate().get("on", False), "turn": a[0] + 1})
+		autoReadyOrWake(a[0] + 1)
 	elif tag == "firstContact" and iTeam in (a[0], a[1]):
 		other = a[1]
 		if other == iTeam:
@@ -999,8 +1002,74 @@ def humanTurn():
 def setReady(byWhom):
 	g = readGate()
 	g["ready_turn"] = humanTurn()
+	g["attention"] = []
 	writeGate(g)
 	writeEvent("claude_ready", {"by": byWhom})
+
+# Auto-ready: on quiet turns the bridge says "ready" by itself, so Claude is only
+# woken (event "claude_wake", with reasons) when something needs attention:
+# events below since the last ready, an enemy inside or next to our borders,
+# or a regular review every few turns. Switched with `civ gate auto on|off [N]`.
+
+ATTENTION_KINDS = ("first_contact", "war_declared", "peace_made", "city_founded", "city_changed_hands",
+	"city_razed", "combat", "tech_learned", "building_built", "project_built", "religion_founded",
+	"great_person", "golden_age", "unit_arrived")
+
+def noteAttention(kind):
+	g = readGate()
+	if not g.get("auto"):
+		return
+	reasons = g.get("attention") or []
+	if kind not in reasons:
+		reasons.append(kind)
+		g["attention"] = reasons
+		writeGate(g)
+
+def enemiesNear():
+	# enemy or barbarian units we can see on our land or right next to it
+	iMe, iTeam = myIds()
+	team = gc.getTeam(iTeam)
+	found = []
+	m = CyMap()
+	for i in range(m.numPlots()):
+		pl = m.plotByIndex(i)
+		if not pl.isVisible(iTeam, False):
+			continue
+		near = pl.getOwner() == iMe
+		if not near:
+			for dx in (-1, 0, 1):
+				for dy in (-1, 0, 1):
+					q = m.plot(pl.getX() + dx, pl.getY() + dy)
+					if q and not q.isNone() and q.getOwner() == iMe:
+						near = True
+		if not near:
+			continue
+		for k in range(pl.getNumUnits()):
+			u = pl.getUnit(k)
+			if u.isInvisible(iTeam, False) or u.getOwner() == iMe:
+				continue
+			if u.isBarbarian() or team.isAtWar(u.getTeam()):
+				found.append("%s at %d,%d" % (gc.getUnitInfo(u.getUnitType()).getDescription(), pl.getX(), pl.getY()))
+				break
+	return found
+
+def autoReadyOrWake(turn):
+	g = readGate()
+	if not (g.get("on") and g.get("auto")):
+		return
+	reasons = list(g.get("attention") or [])
+	enemies = enemiesNear()
+	if enemies:
+		reasons.append("enemy_near: " + "; ".join(enemies[:5]))
+	every = int(g.get("review_every") or 5)
+	if every > 0 and turn % every == 0:
+		reasons.append("review")
+	if reasons:
+		writeEvent("claude_wake", {"turn": turn, "reasons": reasons})
+	else:
+		g["ready_turn"] = turn
+		writeGate(g)
+		writeEvent("auto_ready", {"turn": turn})
 
 def humanPlayers():
 	return [i for i in range(gc.getMAX_CIV_PLAYERS()) if gc.getPlayer(i).isAlive() and gc.getPlayer(i).isHuman()]
@@ -1028,8 +1097,23 @@ def cmdReady(args):
 		gc.getPlayer(getClaudePlayer()).getName(), "")
 	return {"ready_turn": readGate()["ready_turn"]}
 
+def cmdHold(args):
+	# take "ready" back: the player cannot end the turn until the next `civ ready`
+	g = readGate()
+	g["ready_turn"] = -1
+	writeGate(g)
+	writeEvent("claude_hold", {})
+	CyInterface().addImmediateMessage(u"%s wants a moment to think before you end the turn." %
+		gc.getPlayer(getClaudePlayer()).getName(), "")
+	return {"ready": claudeReady()}
+
 def cmdGate(args):
 	g = readGate()
+	if args.has_key("auto"):
+		g["auto"] = bool(args["auto"])
+		if args.has_key("every"):
+			g["review_every"] = int(args["every"])
+		writeGate(g)
 	if args.has_key("on"):
 		g["on"] = bool(args["on"])
 		writeGate(g)
@@ -1084,6 +1168,7 @@ def cmdExec(args):
 
 COMMANDS = {
 	"ready": cmdReady,
+	"hold": cmdHold,
 	"gate": cmdGate,
 	"claim": cmdClaim,
 	"release": cmdRelease,

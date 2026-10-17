@@ -98,6 +98,15 @@ The skill gets real content after stages 3 and 6, once there are real commands a
 - recording via `rec` (OBS): composite screen, webcam, and separate game / terminal streams
 - later: voice for the leader's lines
 
+## Direction: any LLM, many players (decision 2026-10-15)
+Later CIVAI should run with an LLM of the user's choice, and several AIs should be able to play each other (with or without the human) — e.g. Claude vs Gemini vs ChatGPT vs Qwen as a home-made eval. Not now: we keep prototyping with Claude Code for speed, but build so the switch is cheap:
+- **The game side stays model-agnostic.** Mod + mailbox + `civ` CLI are the whole interface; anything that can run a shell command can play. No Claude-specific logic in the bridge.
+- **Everything is per player.** Commands, fairness filter, turn gate, claims and logs should take a player id instead of assuming one "Claude player" (today: `player = N` in `config.txt`). The gate waits for *all* agent-controlled players.
+- **Game knowledge lives in files, not in the chat session.** Plan, dossiers, persona and rules are files in `games/<id>/` and the skill, so another model (or a fresh session) can pick them up.
+- **Wake-ups come from `events.jsonl`.** The Claude Code Monitor is just one reader; a later harness reads the same file.
+- **AI-only games (checked in the SDK 2026-10-15, not tested yet):** the game has a built-in "AI plays itself" mode, `CyGame().setAIAutoPlay(N)`, callable from Python. It removes the human's own civ (the human becomes a spectator) and runs N turns without anyone pressing End Turn; with N large the game never ends early (the "no humans left → game over" check is skipped while autoplay is on). Python's `doReviveActivePlayer` hook can keep the spectator from being revived. Missing piece: with no human End Turn to block, the game won't wait for agents (the AI turn can't be held by the unit hook: after 100 tries the game ends the unit's moves; `setPausePlayer` isn't exposed to Python). Workaround to test: when an agent-controlled player's turn starts, the bridge **holds inside Python**, still answering the mailbox, until that agent says `ready` (with a timeout). The game window freezes during that wait, which is fine for AI-only runs. The same hold could replace the End Turn lock in mixed games.
+- **Cost matters.** Wake only on real events (auto-ready on quiet turns), keep the playing session small (a game-only session, not the dev session).
+
 ## Pitfalls found along the way
 - **The in-game clock moves in 128-second steps**: the graphics engine switches the CPU's floating point to single precision, so `time.time()` in the game's Python is useless for short intervals. Everything time-based uses frame counters. Before we found this, it looked like the game "doesn't work without focus"; in fact the bridge works in the background and answers in ~50 ms.
 - **The game caches the mod's Python files at startup**, and `reload()` returns stale code. So the bridge is loaded with `imp.load_source` straight from disk and **hot-reloads** when the file changes. A game restart is only needed after editing `ClaudeEventManager.py` or the XML.
@@ -136,9 +145,9 @@ Each stage is a small piece: build → check together in the game → fix → mo
 | 3 | Buttons: `actions` + `do` for units and cities, research | ⏳ `move` exists; the general button list, cities and research are next. `civ py` covers dev needs meanwhile |
 | 4 | Taking over from the AI: `claim` / `release`; war and peace only by Claude's decision | ⏳ units ✅ (the scout stood by the cows); war/peace and cities are next |
 | 5 | Turn sync: `ready` | ✅ 2026-10-14: `cannotDoControl` blocks the human's End Turn until `civ ready`; `!go` in chat is the escape hatch; turn start and waiting wake Claude |
-| 6 | Wake-ups: events wake Claude | ✅ mostly: Monitor on `events.jsonl` (re-arm every 30 min); Claude wrote first on meeting the Khan |
+| 6 | Wake-ups: events wake Claude | ✅ mostly: Monitor on `events.jsonl` (re-arm every 30 min); Claude wrote first on meeting the Khan. 2026-10-15: auto-ready on quiet turns (`civ gate auto on [N]`), wake only on `claude_wake` (with reasons), chat or a waiting player; `civ hold` |
 | 7 | In-game chat | ✅ 2026-10-14: the game's own chat (Tab) both ways, `civ say`, `civ chat` |
-| 8 | Skill `civ4-player` + memory: files and update rules | a fresh session with the skill continues the game with the same personality |
+| 8 | Skill `civ4-player` + memory: files and update rules | ⏳ 2026-10-15: `PLAYBOOK.md` (model-agnostic) + thin skill `.claude/skills/civ4-player`; game files persona/plan/dossiers/secrets/chronicle. Done when a fresh session continues the game with the same personality |
 | 9 | Diplomacy: deals | tech trades, peace, open borders agreed in chat |
 | 10 | Test game without recording | a list of what is slow or annoying, fixed |
 | 11 | Video: thought log, overlays, voice, recording | first video |
