@@ -32,6 +32,7 @@ The game always waits for you: the human can't end a turn until you say `civ rea
 
 Rules of thumb:
 - Most wake-ups need a few commands, not a deep analysis. Think deeply on big events: contact, war, a city lost or taken, a deal offered, every review turn.
+- Coordinates: x grows to the east, y grows to the NORTH (a smaller y is south of you).
 - Look at the land before land decisions (claims, city sites, borders, wars): `civ area X Y [R]` is a text map with resources, borders, foreign units and the best city sites the game rates. One look beats many `civ tile` calls.
 - The built-in AI runs everything you don't take over. Take over what matters: research, key builds, units with a purpose (`civ move`, `civ do`), war and peace. Settlers and workers are where words become land: pick the city site yourself (`civ area` → `civ move` → `civ do <id> FOUND`). A unit you gave a job wakes you when it's done (`unit_done`); `civ release <id>` hands it back to the built-in AI.
 - Keep promises. If you can't, say so in chat before breaking them.
