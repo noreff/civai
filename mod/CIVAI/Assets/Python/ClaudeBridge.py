@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 31
+BRIDGE_VERSION = 32
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -681,10 +681,13 @@ def recordEvent(tag, a):
 			writeEvent("message_from_player", {"text": text, "via": "chat"})
 	elif tag == "BeginPlayerTurn":
 		# deals other leaders made with our civ during the turn that just ended
+		w = ("pre", a[1])
+		if a[1] == iMe:
+			w = ("own", a[1])
 		try:
-			checkNativeDeal(g_turnOf[0])
+			checkpoint(w)
 		except:
-			log("native deal check FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
+			log("deal checkpoint FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 		g_turnOf[0] = a[1]
 		if a[1] == iMe:
 			writeEvent("my_turn_begins", {})
@@ -727,6 +730,7 @@ def recordEvent(tag, a):
 		cityItemDone(a[0], OrderTypes.ORDER_TRAIN, a[1].getUnitType())
 		writeEvent("unit_built", {"city": a[0].getName(), "unit": gc.getUnitInfo(a[1].getUnitType()).getType(),
 			"id": a[1].getID()})
+		claimKeyUnit(a[1])
 	elif tag == "buildingBuilt":
 		c, b = a[0], a[1]
 		if c.getOwner() == iMe:
@@ -749,7 +753,9 @@ def recordEvent(tag, a):
 				kind = "war_declared"
 			writeEvent(kind, {"team": gc.getTeam(t1).getName(), "against": gc.getTeam(t2).getName()})
 	elif tag == "greatPersonBorn" and a[1] == iMe:
-		writeEvent("great_person", {"unit": gc.getUnitInfo(a[0].getUnitType()).getType(), "city": a[2].getName()})
+		writeEvent("great_person", {"unit": gc.getUnitInfo(a[0].getUnitType()).getType(), "city": a[2].getName(),
+			"id": a[0].getID()})
+		claimKeyUnit(a[0])
 	elif tag == "goldenAge" and a[0] == iMe:
 		writeEvent("golden_age", {})
 	elif tag == "goodyReceived" and a[0] == iMe:
@@ -797,8 +803,37 @@ def setClaim(uid, target):
 	c[int(uid)] = {"target": target}
 	saveClaims(c)
 
+def isKeyUnit(info):
+	# units whose use is a big decision: where a city goes, a great person's gift, where a faith spreads
+	if info.isFound() or info.getProductionCost() < 0:
+		return True
+	for r in range(gc.getNumReligionInfos()):
+		if info.getReligionSpreads(r) > 0:
+			return True
+	for k in range(gc.getNumCorporationInfos()):
+		if info.getCorporationSpreads(k) > 0:
+			return True
+	return False
+
+def claimKeyUnit(u):
+	# such a unit waits for Claude's orders instead of being used by the built-in AI
+	info = gc.getUnitInfo(u.getUnitType())
+	if not isKeyUnit(info):
+		return
+	c = loadClaims()
+	if not c.has_key(u.getID()):
+		c[u.getID()] = {"target": None}
+		saveClaims(c)
+	writeEvent("unit_waiting", {"id": u.getID(), "unit": info.getType(), "x": u.getX(), "y": u.getY(),
+		"note": "waits for your orders (civ actions %d); civ release %d hands it to the built-in AI" % (u.getID(), u.getID())})
+
 def aiUnitUpdate(gu, argsList):
 	u = argsList[0]
+	if g_window[0] and g_window[0][0] == "human":
+		try:
+			checkpointTick()   # the human's turn just ended: close that window before units move
+		except:
+			log("deal checkpoint FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 	if u.getOwner() != getClaudePlayer():
 		return gu._claudeOrigUnitUpdate(argsList)
 	claims = loadClaims()
@@ -1504,34 +1539,45 @@ def cmdRaze(args):
 		g_razeOK[0] = False
 	return {"razed": name, "population_was": pop}
 
-# ------------------------------------------------- deals Claude didn't make
+# ------------------------------------------------- deals Claude didn't make: Claude's seal
 #
 # The built-in AI still answers for Claude's civ in two places the game gives no hook
 # for: the human's own diplomacy screen, and deals other AI leaders propose during
-# their turns. So the bridge compares snapshots of what Claude's civ has (techs, gold,
-# open borders, pacts, war, resource imports/exports): often during the human's turn,
-# and at every hand-over from one player's turn to the next. An unexplained change is
-# reported as "native_deal" (in the story: Claude's ministers agreed on their own);
-# ongoing parts of it can be ended with `civ cancel`, under the game's normal rules.
+# their diplomacy. Those deals can't be stopped, so they are held for Claude's seal:
+# the bridge spots them (snapshots at every checkpoint: each player's turn start, each
+# AI's diplomacy start, and often during the human's turn), records exactly what moved
+# and wakes Claude ("native_deal" with a number). `civ ratify N` keeps the deal;
+# `civ reject N` undoes it: ongoing parts are ended without the usual grudge, traded
+# techs are taken back on both sides, gold is returned. Peace and vassal treaties
+# can't be undone this way; Claude is told.
+#
+# Who traded what is read from evidence, not guessed: ongoing deals are listed by the
+# game; a traded tech leaves a "traded tech to us" memory on the receiving side; gold
+# between turns only moves by deals. Research or a goody hut never counts as a deal.
 
 g_snap = [None]
 g_snapTick = [0]
 g_turnOf = [None]   # whose turn is running (set at BeginPlayerTurn)
+g_window = [None]   # (kind, player) since the last checkpoint: own, pre, diplo, human
+SEAL_FILE = OUT_DIR + "\\seal.json"
 
 def takeSnapshot():
 	iMe, iTeam = myIds()
 	me, team = gc.getPlayer(iMe), gc.getTeam(iTeam)
-	d = {"techs": [t for t in range(gc.getNumTechInfos()) if team.isHasTech(t)], "gold": me.getGold(), "rel": {}, "res": {}, "theirs": {},
+	d = {"techs": [t for t in range(gc.getNumTechInfos()) if team.isHasTech(t)], "gold": me.getGold(), "rel": {}, "theirs": {},
+		"mem": {}, "deals": {},
 		"researching": [t for t in range(gc.getNumTechInfos()) if me.isResearchingTech(t)]}
 	for i in range(gc.getMAX_CIV_PLAYERS()):
 		p = gc.getPlayer(i)
 		if i == iMe or not p.isAlive() or not team.isHasMet(p.getTeam()):
 			continue
-		d["rel"][i] = [team.isOpenBorders(p.getTeam()), team.isDefensivePact(p.getTeam()), team.isAtWar(p.getTeam())]
+		d["rel"][i] = [team.isOpenBorders(p.getTeam()), team.isDefensivePact(p.getTeam()), team.isAtWar(p.getTeam()),
+			team.isVassal(p.getTeam()), gc.getTeam(p.getTeam()).isVassal(iTeam)]
 		d["theirs"][i] = [t for t in range(gc.getNumTechInfos()) if gc.getTeam(p.getTeam()).isHasTech(t)]
-	for b in range(gc.getNumBonusInfos()):
-		if me.getBonusImport(b) or me.getBonusExport(b):
-			d["res"][b] = [me.getBonusImport(b), me.getBonusExport(b)]
+		d["mem"][i] = [p.AI_getMemoryCount(iMe, MemoryTypes.MEMORY_TRADED_TECH_TO_US),
+			me.AI_getMemoryCount(i, MemoryTypes.MEMORY_TRADED_TECH_TO_US)]
+	for (deal, other, give, get) in ourDeals():
+		d["deals"][deal.getID()] = [other, give, get]
 	return d
 
 def refreshSnapshot():
@@ -1540,69 +1586,217 @@ def refreshSnapshot():
 	except:
 		g_snap[0] = None
 
-def checkNativeDeal(during=-1):
-	# during=-1: the periodic check while the human plays (throttled);
-	# otherwise: a turn just ended, `during` is whose turn it was (None if unknown)
-	iMe = getClaudePlayer()
-	if during == -1:
-		g_snapTick[0] = g_snapTick[0] + 1
-		if g_snapTick[0] % 40:
-			return
-		if not humanPlayers() or not [i for i in humanPlayers() if gc.getPlayer(i).isTurnActive()]:
-			return
-	old = g_snap[0]
+def loadSeal():
+	if not os.path.exists(SEAL_FILE):
+		return {"next": 1, "open": {}}
+	f = open(SEAL_FILE, "rb")
+	try:
+		return fromJson(f.read())
+	finally:
+		f.close()
+
+def saveSeal(o):
+	writeAtomic(SEAL_FILE, toJson(o))
+
+# The game runs every player's upkeep (research, AI diplomacy) in one batch at the end
+# of a round: BeginPlayerTurn(p) -> p's research -> p's AI_doDiplo -> next player.
+# Then the players act in turn: the human first, then the others' units.
+# Windows: "pre" (a player's upkeep), "diplo" (an AI's diplomacy), "own" (ours),
+# "human" (the human's active turn), "active" (the others' moves after it).
+
+def checkpoint(window):
+	# a new window starts; what changed belongs to the one that just ended
+	old, ended = g_snap[0], g_window[0]
 	new = takeSnapshot()
 	g_snap[0] = new
-	if old is None or during == iMe:
-		return   # on our own turn nobody can make a deal for us: research, huts, our own orders
-	aiTurn = during not in (-1, None) and not gc.getPlayer(during).isHuman()
-	# a tech we were researching just finished: research, not a deal
-	got = [gc.getTechInfo(t).getDescription() for t in new["techs"] if t not in old["techs"] and t not in old.get("researching", [])]
-	lost = [gc.getTechInfo(t).getDescription() for t in old["techs"] if t not in new["techs"]]
-	changes, real, who = [], [], []
+	g_window[0] = window
+	if old is None:
+		return
+	kind, who = "unknown", None
+	if ended:
+		kind, who = ended
+	if kind in ("own", "pre", "active"):
+		return   # research, upkeep, unit moves (huts...): nobody deals with us there
+	findDeals(old, new, kind, who)
+
+def checkpointTick():
+	# from poll(): notice the human's turn starting and ending; check often while it runs
+	hs = [i for i in humanPlayers() if gc.getPlayer(i).isTurnActive()]
+	kind = g_window[0] and g_window[0][0]
+	if hs and kind != "human":
+		checkpoint(("human", hs[0]))
+	elif not hs and kind == "human":
+		checkpoint(("active", None))
+	elif hs:
+		g_snapTick[0] = g_snapTick[0] + 1
+		if g_snapTick[0] % 40 == 0:
+			checkpoint(("human", hs[0]))
+
+def findDeals(old, new, kind, who):
+	iMe = getClaudePlayer()
+	recs = {}
+	notes = []
+	def rec(i):
+		if not recs.has_key(i):
+			recs[i] = {"with": i, "we_gave": [], "we_got": [], "deal_ids": [], "techs_given": [], "techs_got": [],
+				"gold": 0, "permanent": []}
+		return recs[i]
+	# ongoing deals, exactly as the game lists them
+	for did, v in new["deals"].items():
+		if not old["deals"].has_key(did):
+			r = rec(v[0])
+			r["deal_ids"].append(did)
+			r["we_gave"] = r["we_gave"] + v[1]
+			r["we_got"] = r["we_got"] + v[2]
+	for did, v in old["deals"].items():
+		if not new["deals"].has_key(did):
+			notes.append("deal #%d with %s ended (we gave %s; they gave %s)" % (did, pname(v[0]), ", ".join(v[1]) or "nothing",
+				", ".join(v[2]) or "nothing"))
+	# techs: only with the "traded tech to us" memory as proof
+	got = [t for t in new["techs"] if t not in old["techs"] and t not in old.get("researching", [])]
+	for i in new["theirs"].keys():
+		if not old["theirs"].has_key(i):
+			continue
+		dm = new["mem"][i][0] - old["mem"][i][0]
+		gained = [t for t in new["theirs"][i] if t not in old["theirs"][i] and t in old["techs"]]
+		if dm > 0 and gained:
+			if len(gained) <= dm:
+				rec(i)["techs_given"] = gained
+			else:
+				notes.append("%s got %s, some of it from us (can't tell which)" % (pname(i), ", ".join(techNames(gained))))
+		dk = new["mem"][i][1] - old["mem"][i][1]
+		mine = [t for t in got if t in old["theirs"][i]]
+		if dk > 0 and mine:
+			rec(i)["techs_got"] = mine[:dk]
+			got = [t for t in got if t not in mine[:dk]]
 	if got:
-		real.append("we got " + ", ".join(got))
-	if lost:
-		real.append("we lost " + ", ".join(lost))
+		notes.append("we also got %s (not traded: e.g. a goody hut)" % ", ".join(techNames(got)))
+	# gold: between turns it only moves by deals
+	dg = new["gold"] - old["gold"]
+	if dg and kind in ("diplo", "human") and who is not None:
+		rec(who)["gold"] = dg
+	# peace and vassal treaties
 	for i, rel in new["rel"].items():
 		was = old["rel"].get(i)
 		if was is None:
 			continue
-		warStarted = rel[2] and not was[2]
-		for k, name in ((0, "open borders"), (1, "defensive pact"), (2, "war")):
-			if rel[k] == was[k]:
-				continue
-			if warStarted and (k == 2 or not rel[k]):
-				continue   # a declaration of war (its own event) ends treaties by itself: not a deal
-			state = "ended"
-			if rel[k]:
-				state = "started"
-			real.append("%s with %s %s" % (name, pname(i), state))
-			who.append(i)
-		gained = [gc.getTechInfo(t).getDescription() for t in new["theirs"].get(i, []) if t not in old["theirs"].get(i, [])]
-		if gained:
-			changes.append("%s gained %s at the same time" % (pname(i), ", ".join(gained)))
-	for b in dict(new["res"].items() + old["res"].items()).keys():
-		a, z = old["res"].get(b, [0, 0]), new["res"].get(b, [0, 0])
-		if a != z:
-			real.append("%s: importing %d (was %d), exporting %d (was %d)" % (gc.getBonusInfo(b).getDescription(), z[0], a[0], z[1], a[1]))
-	# between other players' turns our gold only moves by deals (tribute, gifts, trades)
-	if aiTurn and new["gold"] != old["gold"]:
-		real.append("our gold %d -> %d" % (old["gold"], new["gold"]))
-	if not real:
-		return   # only someone else's research moved: not a deal with us
-	if not aiTurn and new["gold"] != old["gold"]:
-		real.append("our gold %d -> %d" % (old["gold"], new["gold"]))
-	d = {"changes": real + changes}
-	if aiTurn:
-		d["during_turn_of"] = pname(during)
-		d["note"] = ("during %s's turn: an AI leader proposed this and the built-in AI accepted for us "
-			"(or the other side ended a deal)" % pname(during))
-	else:
-		d["note"] = "made in the game's own diplomacy screen; the built-in AI agreed on our behalf"
-	if [x for x in real if x.find("started") >= 0 or x.find("importing") >= 0]:
-		d["note"] = d["note"] + ". Ongoing deals: see `civ deals`, end one with `civ cancel`"
-	writeEvent("native_deal", d)
+		if was[2] and not rel[2]:
+			rec(i)["permanent"].append("peace with %s" % pname(i))
+		if rel[3] and not was[3]:
+			rec(i)["permanent"].append("we became %s's vassal" % pname(i))
+		if rel[4] and not was[4]:
+			rec(i)["permanent"].append("%s became our vassal" % pname(i))
+	o = None
+	for i, r in recs.items():
+		r["we_gave"] = r["we_gave"] + techNames(r["techs_given"])
+		r["we_got"] = r["we_got"] + techNames(r["techs_got"])
+		if r["gold"] > 0:
+			r["we_got"].append("%d gold" % r["gold"])
+		elif r["gold"] < 0:
+			r["we_gave"].append("%d gold" % -r["gold"])
+		if not (r["we_gave"] or r["we_got"] or r["permanent"]):
+			continue
+		if o is None:
+			o = loadSeal()
+		n = o["next"]
+		o["next"] = n + 1
+		r["turn"] = gc.getGame().getGameTurn()
+		r["how"] = "the game's diplomacy screen"
+		if kind == "diplo":
+			r["how"] = "%s's proposal during their turn" % pname(i)
+		o["open"][str(n)] = r
+		d = {"n": n, "with": pname(i), "how": r["how"], "we_gave": r["we_gave"] or ["nothing"], "we_got": r["we_got"] or ["nothing"],
+			"note": "the built-in AI agreed to this for us; it waits for your seal: `civ ratify %d` keeps it, "
+				"`civ reject %d` undoes it" % (n, n)}
+		if r["permanent"]:
+			d["can't_be_undone"] = r["permanent"]
+		if notes:
+			d["also"] = notes
+		writeEvent("native_deal", d)
+	if o is not None:
+		saveSeal(o)
+	elif notes and [x for x in notes if x.find("ended") >= 0]:
+		writeEvent("deal_ended", {"changes": notes})
+
+def techNames(ts):
+	return [gc.getTechInfo(t).getDescription() for t in ts]
+
+def sealLine(n, r):
+	s = "#%s with %s (turn %s, %s): we gave %s; we got %s" % (n, pname(r["with"]), r.get("turn"), r.get("how"),
+		", ".join(r["we_gave"]) or "nothing", ", ".join(r["we_got"]) or "nothing")
+	if r.get("permanent"):
+		s = s + "; can't be undone: " + ", ".join(r["permanent"])
+	return s
+
+def cmdRatify(args):
+	o = loadSeal()
+	n = str(args["n"]).lstrip("#")
+	if not o["open"].has_key(n):
+		raise Exception("no deal #%s waits for your seal (see `civ offers`)" % n)
+	r = o["open"][n]
+	del o["open"][n]
+	saveSeal(o)
+	writeEvent("deal_ratified", {"n": int(n), "deal": sealLine(n, r)})
+	return {"ratified": sealLine(n, r)}
+
+def cmdReject(args):
+	iMe = getClaudePlayer()
+	me = gc.getPlayer(iMe)
+	o = loadSeal()
+	n = str(args["n"]).lstrip("#")
+	if not o["open"].has_key(n):
+		raise Exception("no deal #%s waits for your seal (see `civ offers`)" % n)
+	r = o["open"][n]
+	x = r["with"]
+	them = gc.getPlayer(x)
+	done, left = [], list(r.get("permanent") or [])
+	g = gc.getGame()
+	for did in r["deal_ids"]:
+		deal = g.getDeal(did)
+		if deal.isNone():
+			left.append("deal #%d had already ended" % did)
+			continue
+		ob = [k for k in range(deal.getLengthFirstTrades()) if tradeName(deal.getFirstTrade(k)) == "open borders"]
+		deal.kill()
+		if ob:
+			# the game's cancel leaves a grudge on both sides; this deal was never sealed
+			for (a, b) in ((x, iMe), (iMe, x)):
+				if gc.getPlayer(a).AI_getMemoryCount(b, MemoryTypes.MEMORY_CANCELLED_OPEN_BORDERS) > 0:
+					gc.getPlayer(a).AI_changeMemoryCount(b, MemoryTypes.MEMORY_CANCELLED_OPEN_BORDERS, -1)
+		done.append("ended deal #%d" % did)
+	for t in r["techs_got"]:
+		if gc.getTeam(me.getTeam()).isHasTech(t):
+			gc.getTeam(me.getTeam()).setHasTech(t, False, iMe, False, False)
+			if me.AI_getMemoryCount(x, MemoryTypes.MEMORY_TRADED_TECH_TO_US) > 0:
+				me.AI_changeMemoryCount(x, MemoryTypes.MEMORY_TRADED_TECH_TO_US, -1)
+			done.append("gave back %s" % gc.getTechInfo(t).getDescription())
+	for t in r["techs_given"]:
+		if gc.getTeam(them.getTeam()).isHasTech(t):
+			gc.getTeam(them.getTeam()).setHasTech(t, False, x, False, False)
+			if them.AI_getMemoryCount(iMe, MemoryTypes.MEMORY_TRADED_TECH_TO_US) > 0:
+				them.AI_changeMemoryCount(iMe, MemoryTypes.MEMORY_TRADED_TECH_TO_US, -1)
+			done.append("took back %s" % gc.getTechInfo(t).getDescription())
+	if r["gold"] > 0:
+		back = min(r["gold"], me.getGold())
+		me.changeGold(-back)
+		them.changeGold(back)
+		done.append("returned %d gold" % back)
+	elif r["gold"] < 0:
+		back = min(-r["gold"], them.getGold())
+		them.changeGold(-back)
+		me.changeGold(back)
+		done.append("got back %d gold" % back)
+	del o["open"][n]
+	saveSeal(o)
+	refreshSnapshot()
+	line = sealLine(n, r)
+	writeEvent("deal_rejected", {"n": int(n), "deal": line, "undone": done, "not_undone": left})
+	if them.isHuman():
+		msg = u"<font=4><color=255,200,60,255>%s refuses to seal the deal his ministers made with you: %s</color></font>" % (
+			me.getName(), "; ".join(done) or "nothing to undo")
+		CyInterface().addMessage(x, True, gc.getEVENT_MESSAGE_TIME() * 3, msg, "",
+			InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
+	return {"rejected": line, "undone": done or ["nothing"], "not_undone": left or ["nothing"]}
 
 # ------------------------------------------------- ongoing deals: list and cancel
 
@@ -1934,7 +2128,9 @@ def dealBeginTrampoline(argsList=-1):
 
 def cmdOffers(args):
 	o = loadOffers()
-	return {"open": ["#%s to %s: give %s; get %s" % (k, pname(v["to"]), ", ".join([itemText(tuple(x)) for x in v["give"]]) or "nothing",
+	seal = loadSeal()
+	return {"waiting_for_your_seal": [sealLine(k, v) for k, v in seal["open"].items()] or ["none"],
+		"open": ["#%s to %s: give %s; get %s" % (k, pname(v["to"]), ", ".join([itemText(tuple(x)) for x in v["give"]]) or "nothing",
 		", ".join([itemText(tuple(x)) for x in v["get"]])) for k, v in o["open"].items()]}
 
 def cmdWar(args):
@@ -2068,6 +2264,10 @@ def cmdRules(args):
 def aiDoDiplo(gu, argsList):
 	if argsList[0] == getClaudePlayer():
 		return True
+	try:
+		checkpoint(("diplo", argsList[0]))   # what follows is this leader's diplomacy
+	except:
+		log("deal checkpoint FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 	return gu._claudeOrigDoDiplo(argsList)
 
 def aiDoWar(gu, argsList):
@@ -2248,13 +2448,20 @@ def aiChooseProduction(gu, argsList):
 	# the game clears a city's queue before asking us, so we put Claude's remaining
 	# items back; only when Claude's queue is used up does the built-in AI choose
 	c = argsList[0]
-	q = loadCityClaims().get(cityKey(c))
+	d = loadCityClaims()
+	q = d.get(cityKey(c))
 	if q:
 		if c.getOrderQueueLength() == 0:
 			for (order, data) in q:
 				c.pushOrder(OrderTypes(order), data, -1, False, False, True, False)
 		if c.getOrderQueueLength() > 0:
 			return True
+	elif q is not None and c.getOwner() == getClaudePlayer():
+		# Claude's list for this city is done: tell Claude once, the built-in AI fills in meanwhile
+		del d[cityKey(c)]
+		saveCityClaims(d)
+		writeEvent("city_queue_done", {"city": c.getName(),
+			"note": "your build list here is finished; the built-in AI picks until you `civ build` again"})
 	return gu._claudeOrigChooseProduction(argsList)
 
 def chooseProductionTrampoline(argsList):
@@ -2310,7 +2517,8 @@ def setReady(byWhom):
 
 ATTENTION_KINDS = ("first_contact", "war_declared", "peace_made", "city_founded", "city_changed_hands",
 	"city_razed", "combat", "tech_learned", "building_built", "project_built", "religion_founded",
-	"great_person", "golden_age", "unit_arrived", "unit_done", "deal_done", "deal_declined", "deal_failed", "native_deal", "ai_change_undone")
+	"great_person", "golden_age", "unit_arrived", "unit_done", "deal_done", "deal_declined", "deal_failed", "native_deal", "ai_change_undone",
+	"unit_waiting", "city_queue_done", "deal_ended", "budget_suspended")
 
 def noteAttention(kind):
 	g = readGate()
@@ -2492,6 +2700,8 @@ COMMANDS = {
 	"rules": cmdRules,
 	"war": cmdWar,
 	"deals": cmdDeals,
+	"ratify": cmdRatify,
+	"reject": cmdReject,
 	"cancel": cmdCancel,
 	"budget": cmdBudget,
 	"raze": cmdRaze,
@@ -2561,7 +2771,7 @@ def poll():
 			except:
 				log("choices guard FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 			try:
-				checkNativeDeal()
+				checkpointTick()
 			except:
 				log("native deal check FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 		names = [n for n in os.listdir(IN_DIR) if n.endswith(".json")]

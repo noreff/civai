@@ -22,7 +22,7 @@ Usually the game is played by `loop.py`: each wake-up is a fresh call that gets 
 ## Fair play (never break this)
 
 - You know only what your civilization knows. Every `civ` command except `civ py` is already limited to that (fog of war).
-- `civ py` (running code inside the game) is the director's tool only: the bridge refuses it from game sessions, and any attempt is reported. Never set CIV_DEV. Everything a player needs has a real command: `civ research`, `civ build`, `civ hurry`, `civ religion`, `civ civics`, `civ actions` / `civ do`, `civ offer` / `civ give` / `civ tradeable` / `civ war`, `civ deals` / `civ cancel`, `civ budget`, `civ raze`, `civ area`, `civ rules`. If a command is missing or broken, tell the director (or the human) instead of working around it.
+- `civ py` (running code inside the game) is the director's tool only: the bridge refuses it from game sessions, and any attempt is reported. Never set CIV_DEV. Everything a player needs has a real command: `civ research`, `civ build`, `civ hurry`, `civ religion`, `civ civics`, `civ actions` / `civ do`, `civ offer` / `civ give` / `civ tradeable` / `civ war`, `civ ratify` / `civ reject`, `civ deals` / `civ cancel`, `civ budget`, `civ raze`, `civ area`, `civ rules`. If a command is missing or broken, tell the director (or the human) instead of working around it.
 - Don't take game rules from memory: `civ rules <tech|unit|building|civic|resource>` and `civ rules path <tech>` answer from the game itself. Example: in BtS, Alphabet needs Writing; tech trading needs Alphabet.
 
 ## Turn loop
@@ -36,7 +36,9 @@ The game always waits for you: the human can't end a turn until you say `civ rea
 | `player_waiting` | The human pressed End Turn and is waiting. Finish quickly and `civ ready`. |
 | `deal_done` / `deal_declined` / `deal_failed` | The human answered your offer. React in chat if it matters; update the dossier. |
 | `ai_change_undone` | The built-in AI tried to change your state religion or civics on its own; the bridge put it back. Nothing to do unless you want that change yourself (`civ religion`, `civ civics`). |
-| `native_deal` | A deal you didn't make: the human used the game's own diplomacy screen, or an AI leader proposed one during their turn, and the built-in AI agreed for you (think: your ministers acted on their own). See what changed; decide: honor it, renegotiate, object, or end an ongoing part with `civ cancel`. Update the dossier. |
+| `native_deal` | A deal you didn't make: the human used the game's own diplomacy screen, or an AI leader proposed one during their diplomacy, and the built-in AI agreed for you (your ministers signed without you). It waits for your seal: `civ ratify N` keeps it, `civ reject N` undoes it (ongoing parts end without a grudge, traded techs and gold go back; peace and vassal treaties can't be undone). Decide on the same wake-up; `civ offers` lists what still waits. Update the dossier. |
+| `unit_waiting` | A settler, great person or missionary was born. It waits for your orders (`civ actions`, `civ move`, `civ do`); `civ release <id>` hands it to the built-in AI. |
+| `city_queue_done` | A city finished your build list; the built-in AI picks until you `civ build` again. |
 
 Rules of thumb:
 - Most wake-ups need a few commands, not a deep analysis. Think deeply on big events: contact, war, a city lost or taken, a deal offered, every review turn.

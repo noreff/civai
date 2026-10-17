@@ -31,6 +31,9 @@
                            (the built-in AI can't change religion or civics for us: the
                            bridge undoes its changes, event ai_change_undone)
   civ war <player>         declare war (only Claude declares wars for its civ)
+  civ ratify <N>           keep deal #N that the built-in AI agreed to for us (event native_deal)
+  civ reject <N>           undo deal #N: ongoing parts end without a grudge, techs and gold go back
+                           (peace and vassal treaties can't be undone); `civ offers` lists them
   civ deals                our ongoing deals (open borders, pacts, resources...) and when each can be cancelled
   civ cancel <deal#|player>  end an ongoing deal, like the diplomacy screen's "cancel" (the other side remembers)
   civ budget [research N gold N culture N espionage N | auto]
@@ -386,6 +389,8 @@ def main(argv):
             print(fmt_record(call("offers")))
         elif cmd == "war":
             print(fmt_record(call("war", {"player": argv[1]})))
+        elif cmd in ("ratify", "reject"):
+            print(fmt_record(call(cmd, {"n": argv[1]})))
         elif cmd == "deals":
             print("\n".join(call("deals")["deals"]))
         elif cmd == "cancel":
