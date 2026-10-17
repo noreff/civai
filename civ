@@ -74,6 +74,9 @@
   civ say "<text>"         chat line to the player in the game, from Claude's leader
   civ say --popup "<text>" the same as a popup window
   civ chat [N]             last N chat messages both ways (default 20); works without the game
+  civ director "<text>"    a note to the CIVAI director (not the game): a broken or missing tool,
+                           something that looks wrong; answers come in director_notes.md.
+                           Without text: what was sent
   civ think "<text>"       one line of Claude's reasoning for the video (thoughts.log)
   civ events [N]           last N things that happened (default 30); works without the game
   civ raw <cmd> [json]     send any bridge command, print the JSON reply
@@ -347,7 +350,7 @@ def video_log(name, record):
 
 
 def main(argv):
-    if argv and argv[0] not in ("-h", "--help", "help", "think", "events", "chat"):
+    if argv and argv[0] not in ("-h", "--help", "help", "think", "events", "chat", "director"):
         video_log("commands.jsonl", {"cmd": " ".join(argv)[:500]})
     if not argv or argv[0] in ("-h", "--help", "help"):
         print(__doc__.strip())
@@ -512,6 +515,16 @@ def main(argv):
                         print("T%-4d %s %-7s %s" % (m["turn"], m["time"], m["from"], m["text"]))
             else:
                 print("no messages yet")
+        elif cmd == "director":
+            # a note to the CIVAI director (the human who maintains the tools), never seen in the game
+            text = " ".join(argv[1:]).strip()
+            path = os.path.join(VIDEO_LOG_DIR, "to_director.jsonl")
+            if text:
+                video_log("to_director.jsonl", {"text": text})
+                print("sent to the director; answers come in director_notes.md")
+            else:
+                rows = [json.loads(l) for l in open(path)] if os.path.exists(path) else []
+                print("\n".join("%s  %s" % (r["wall"], r["text"]) for r in rows[-10:]) or "(nothing sent yet)")
         elif cmd == "think":
             video_log("thoughts.jsonl", {"text": " ".join(argv[1:])})
             print("noted")

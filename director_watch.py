@@ -5,6 +5,7 @@
   - `civ py` code that looks at other players (possible peeking past the fog of war)
   - errors in the bridge log
   - a game session trying civ py (refused unless marked as the director's, CIV_DEV=1)
+  - a note the playing agent sent to the director (`civ director "..."`)
 It also drops a marker into the running recording (`rec mark`) on key game events,
 silently, so editing can jump straight to them.
 
@@ -107,8 +108,9 @@ def main():
     try:
         gid = open(os.path.expanduser("~/civai/games/CURRENT")).read().strip()
         lp = follow(os.path.expanduser("~/civai/games/%s/loop.log" % gid))
+        td = follow(os.path.expanduser("~/civai/games/%s/to_director.jsonl" % gid))
     except Exception:
-        lp = iter(lambda: None, 1)
+        lp = td = iter(lambda: None, 1)
     pending = None          # (kind, turn, since) of an unanswered wake-up
     warned = False
     block = []
@@ -149,6 +151,12 @@ def main():
             busy = True
             if "Traceback" in line or "timed out" in line or "forced ready" in line or "Error" in line:
                 say("LOOP: " + line.strip()[:300])
+        for line in iter(lambda: next(td), None):
+            busy = True
+            try:
+                say("FROM THE PLAYER AGENT: " + json.loads(line).get("text", ""))
+            except ValueError:
+                pass
         if pending and not warned and time.time() - pending[2] > STUCK:
             say("STUCK: %s on turn %s unanswered for %d min" % (pending[0], pending[1], STUCK // 60))
             warned = True
