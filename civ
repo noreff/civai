@@ -297,7 +297,9 @@ def main(argv):
         elif cmd == "map":
             cmd_map(argv[1:])
         elif cmd == "tile":
-            print(fmt_record(call("tile", {"x": int(argv[1]), "y": int(argv[2])})))
+            # "civ tile 56 16", "civ tile '56 16'" and "civ tile 56,16" all work
+            xy = " ".join(argv[1:]).replace(",", " ").split()
+            print(fmt_record(call("tile", {"x": int(xy[0]), "y": int(xy[1])})))
         elif cmd == "city":
             cmd_city(argv[1:])
         elif cmd == "unit":

@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 18
+BRIDGE_VERSION = 19
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -590,8 +590,11 @@ def cmdPlayer(args):
 		p = gc.getPlayer(i)
 		if not p.isAlive():
 			continue
-		if want is not None and (str(i) == str(want) or p.getName().lower() == unicode(want).lower()
-				or p.getCivilizationShortDescription(0).lower() == unicode(want).lower()):
+		w = unicode(want).lower()
+		if want is not None and (str(i) == str(want) or p.getName().lower() == w
+				or p.getCivilizationShortDescription(0).lower() == w
+				or (len(w) >= 3 and (p.getName().lower().startswith(w)
+					or p.getCivilizationShortDescription(0).lower().startswith(w)))):
 			target = i
 			break
 	if target < 0:
