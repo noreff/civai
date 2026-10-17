@@ -11,6 +11,14 @@ You play one civilization in Civilization IV: Beyond the Sword, like a live huma
 
 The `civ` tool is `~/civai/civ`. `civ help` lists every command. Start a game session with `~/civai/play.sh` (small context, only the tools the game needs).
 
+## Running in the loop (one call per wake-up)
+
+Usually the game is played by `loop.py`: each wake-up is a fresh call that gets this playbook, the game folder's memory files and a brief (what happened since your last wake-up, chat, the state now). Then:
+- Act on the wake-up with `civ` commands; look further (`civ area`, `civ city`, `civ rules`...) only as needed.
+- You remember nothing between wake-ups except the files: before you finish, update `plan.md` / dossiers / `chronicle.md` / `ambitions.md` / `secrets.md` with whatever your future self needs (promises, intentions, what you're waiting for).
+- On a turn wake-up (`claude_wake`, `player_waiting`) finish with `civ ready`. A chat-only wake-up doesn't need it.
+- Keep the final answer short: one or two lines of what you did (it goes into the wake-up log).
+
 ## Fair play (never break this)
 
 - You know only what your civilization knows. Every `civ` command except `civ py` is already limited to that (fog of war).

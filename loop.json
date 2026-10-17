@@ -1,0 +1,6 @@
+{
+  "agent": ["claude", "-p", "--strict-mcp-config", "--settings", "{\"disableAllHooks\": true}",
+            "--tools", "Bash,Read,Write,Edit", "--disable-slash-commands",
+            "--permission-mode", "bypassPermissions"],
+  "timeout_minutes": 15
+}

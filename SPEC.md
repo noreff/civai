@@ -152,7 +152,7 @@ Each stage is a small piece: build → check together in the game → fix → mo
 | 5 | Turn sync: `ready` | ✅ 2026-10-14: `cannotDoControl` blocks the human's End Turn until `civ ready`; `!go` in chat is the escape hatch; turn start and waiting wake Claude |
 | 6 | Wake-ups: events wake Claude | ✅ mostly: Monitor on `events.jsonl` (re-arm every 30 min); Claude wrote first on meeting the Khan. 2026-10-15: auto-ready on quiet turns (`civ gate auto on [N]`), wake only on `claude_wake` (with reasons), chat or a waiting player; `civ hold` |
 | 7 | In-game chat | ✅ 2026-10-14: the game's own chat (Tab) both ways, `civ say`, `civ chat` |
-| 8 | Skill `civ4-player` + memory: files and update rules | ⏳ 2026-10-15: `PLAYBOOK.md` (model-agnostic) + thin skill `.claude/skills/civ4-player`; game files persona/plan/dossiers/secrets/chronicle. Done when a fresh session continues the game with the same personality |
+| 8 | Skill `civ4-player` + memory: files and update rules (2026-10-15: `loop.py` plays one fresh call per wake-up — playbook + memory files + brief; model command in `loop.json`; wake-up logs in `games/<id>/wakes/`) | ⏳ 2026-10-15: `PLAYBOOK.md` (model-agnostic) + thin skill `.claude/skills/civ4-player`; game files persona/plan/dossiers/secrets/chronicle. Done when a fresh session continues the game with the same personality |
 | 9 | Diplomacy: deals | tech trades, peace, open borders agreed in chat |
 | 10 | Test game without recording | a list of what is slow or annoying, fixed |
 | 11 | Video: thought log, overlays, voice, recording | first video |
