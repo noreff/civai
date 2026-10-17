@@ -110,7 +110,7 @@ def brief(events, chat, reasons):
     parts += ambitions_note(status)
     parts += ["", "## State now", "", status, "", civ("research"), "", civ("offers"), "",
               "### Ongoing deals", "", civ("deals"), "", "### Budget", "", civ("budget"), "", civ("gate")]
-    parts += ["", "## Map of my land", "", my_land_map(status)]
+    parts += ["", "## Map of my land", "", my_land_map()]
     return "\n".join(parts)
 
 
@@ -128,15 +128,16 @@ def ambitions_note(status):
     return []
 
 
-def my_land_map(status):
-    # one text map around all my cities, with their surroundings
-    xy = [(int(a), int(b)) for a, b in re.findall(r"^  \S.*? \((\d+),(\d+)\) pop ", status, re.M)]
-    if not xy:
-        return "(no cities)"
-    cx = (min(x for x, _ in xy) + max(x for x, _ in xy)) // 2
-    cy = (min(y for _, y in xy) + max(y for _, y in xy)) // 2
-    r = min(12, max(max(abs(x - cx), abs(y - cy)) for x, y in xy) + 4)
-    return civ("area", str(cx), str(cy), str(r))
+def my_land_map():
+    # places, the 8 tiles around every hot spot, battle cards, and pictures saved for the Read tool
+    # (a picture inside the prompt would stop the prompt cache; see mapview.py)
+    sys.path.insert(0, HERE)
+    import mapview
+    _, d = game_dir()
+    try:
+        return mapview.brief(mapview.live_state(), os.path.join(d, "map"))
+    except Exception as e:
+        return "(map unavailable: %s)" % e
 
 
 def recent_wakes(n):

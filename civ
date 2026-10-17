@@ -48,6 +48,10 @@
                            the commerce split: show it, or set it (steps of 10, sum 100; gold takes
                            what's left); kept every turn until `civ budget auto` hands it back to the AI
   civ raze <city>          burn a city we just captured (this turn or last); otherwise captured cities are kept
+  civ around X Y           one place and its 8 neighbours: ground (HILL/flat, forest, river, road),
+                           owner, city, resource, units; every line with its coordinates
+  civ card <city>          battle card for attacking a city: the ground under it, the tiles around it
+                           ranked for attackers, the approach from our nearest city, foreign units near
   civ area X Y [R]         text map of the region around X Y (radius R, default 6) with cities,
                            resources, foreign units, borders, and the best city sites there
   civ research [tech] [--queue]
@@ -88,6 +92,7 @@ The game answers only while a game is loaded; commands wait up to 2 min.
 import json
 import os
 import sys
+import subprocess
 import time
 import uuid
 
@@ -173,6 +178,14 @@ def fmt_status(s):
     out.append("Gold %d (%+d/turn). Research: %s (%s turns). Era %s. State religion %s." % (
         emp["gold"], emp["gold_per_turn"], short(emp["research"]), emp.get("research_turns", "?"),
         short(mep.get("era")), short(mep.get("state_religion"))))
+    f = emp.get("finances")
+    if f:
+        costs = f["cities"] + f["civics"] + f["units"] + f["unit_supply"] + f["inflation"]
+        line = "Money: income %d; costs %d = cities %d, civics %d, units %d, unit supply %d, inflation %d." % (
+            f["income"], costs, f["cities"], f["civics"], f["units"], f["unit_supply"], f["inflation"])
+        if emp["gold_per_turn"] < 0:
+            line += " The treasury runs dry in %d turns; at 0 the game disbands units." % (emp["gold"] // -emp["gold_per_turn"])
+        out.append(line)
     out.append("")
     out.append("Cities:")
     for c in emp["cities"]:
@@ -371,6 +384,9 @@ def main(argv):
             print(fmt_status(call("status")))
         elif cmd == "map":
             cmd_map(argv[1:])
+        elif cmd in ("around", "card"):
+            r = subprocess.run([os.path.join(HERE, "mapview.py"), cmd] + argv[1:], capture_output=True, text=True, timeout=180)
+            print((r.stdout + r.stderr).strip())
         elif cmd == "odds":
             xy = " ".join(argv[1:3]).replace(",", " ").split()
             a = {"x": int(xy[0]), "y": int(xy[1])}

@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 40
+BRIDGE_VERSION = 41
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -181,6 +181,10 @@ def collectMyEmpire(iMe):
 	d = {
 		"gold": p.getGold(),
 		"gold_per_turn": p.calculateGoldRate(),
+		# the finance advisor's numbers (what a human sees there)
+		"finances": {"income": p.getCommerceRate(CommerceTypes.COMMERCE_GOLD), "cities": p.getTotalMaintenance(),
+			"civics": p.getCivicUpkeep([], False), "units": p.calculateUnitCost(), "unit_supply": p.calculateUnitSupply(),
+			"inflation": p.calculateInflatedCosts() - p.calculatePreInflatedCosts()},
 		"research": infoType(gc.getTechInfo, tech),
 		"cities": cities,
 	}
