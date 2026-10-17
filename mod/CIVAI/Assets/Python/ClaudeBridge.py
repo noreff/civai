@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 24
+BRIDGE_VERSION = 25
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -963,6 +963,9 @@ def installPatches():
 	import CvUtil
 	em = CvEventInterface.getEventManager()
 	em.Events[CHAT_EVENT_ID] = ("ClaudeChat", chatApply, chatBegin)
+	em.Events[DEAL_EVENT_ID] = ("ClaudeDeal", dealApplyTrampoline, dealBeginTrampoline)
+	if DEAL_EVENT_ID not in CvUtil.SilentEvents:
+		CvUtil.SilentEvents.append(DEAL_EVENT_ID)
 	if CHAT_EVENT_ID not in CvUtil.SilentEvents:
 		CvUtil.SilentEvents.append(CHAT_EVENT_ID)
 	if not hasattr(em, "_claudeOrigKbd"):
@@ -1427,11 +1430,12 @@ def cmdOffer(args):
 	o["open"][str(n)] = {"from": iMe, "to": other, "give": [list(x) for x in give], "get": [list(x) for x in get],
 		"turn": gc.getGame().getGameTurn()}
 	saveOffers(o)
-	line = u"<font=4><color=255,200,60,255>%s offers a deal #%d - you get: %s; he gets: %s. Type !accept %d or !decline %d in chat.</color></font>" % (
+	line = u"<font=4><color=255,200,60,255>%s offers a deal #%d - you get: %s; he gets: %s. Answer in the window (or type !accept %d / !decline %d in chat).</color></font>" % (
 		gc.getPlayer(iMe).getName(), n, ", ".join([itemText(x) for x in give]) or "nothing",
 		", ".join([itemText(x) for x in get]), n, n)
 	CyInterface().addMessage(other, True, gc.getEVENT_MESSAGE_TIME() * 4, line, "",
 		InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
+	dealPopup(n, iMe, give, get)
 	writeEvent("deal_offered", {"id": n, "to": pname(other), "give": [itemText(x) for x in give], "get": [itemText(x) for x in get]})
 	return {"offer": n, "waiting_for": pname(other)}
 
@@ -1460,6 +1464,40 @@ def answerOffer(text, human):
 		return
 	writeEvent("deal_done", {"id": int(n), "with": pname(human), "gave": [itemText(x) for x in give], "got": [itemText(x) for x in get]})
 	CyInterface().addImmediateMessage(u"Deal #%s done." % n, "")
+
+DEAL_EVENT_ID = 5918
+
+def dealPopup(n, fromPlayer, give, get):
+	# the game's own popup window with Accept / Decline buttons (the leader-screen diplomacy
+	# itself can't be opened from Python); the answer comes back through dealApply
+	import Popup as PyPopup
+	p = gc.getPlayer(fromPlayer)
+	popup = PyPopup.PyPopup(DEAL_EVENT_ID, EventContextTypes.EVENTCONTEXT_ALL)
+	popup.setHeaderString(u"%s proposes a deal (#%d)" % (p.getName(), n))
+	try:
+		popup.addDDS(gc.getLeaderHeadInfo(p.getLeaderType()).getButton(), 0, 0, 64, 64)
+	except:
+		pass
+	popup.setBodyString(u"You receive: %s\n\n%s receives: %s" % (", ".join([itemText(x) for x in give]) or u"nothing",
+		p.getName(), ", ".join([itemText(x) for x in get]) or u"nothing"))
+	popup.addButton(u"Accept")
+	popup.addButton(u"Decline")
+	popup.setUserData((n,))
+	popup.launch(False)
+
+def dealApply(playerID, userData, popupReturn):
+	n = userData[0]
+	verb = u"!decline"
+	if popupReturn.getButtonClicked() == 0:
+		verb = u"!accept"
+	answerOffer(u"%s %d" % (verb, n), playerID)
+	return 0
+
+def dealApplyTrampoline(playerID, userData, popupReturn):
+	return sys.modules["ClaudeBridge"].dealApply(playerID, userData, popupReturn)
+
+def dealBeginTrampoline(argsList=-1):
+	return 0
 
 def cmdOffers(args):
 	o = loadOffers()
