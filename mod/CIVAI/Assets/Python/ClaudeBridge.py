@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 39
+BRIDGE_VERSION = 40
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -846,6 +846,14 @@ def recordEvent(tag, a):
 			if war:
 				kind = "war_declared"
 			writeEvent(kind, {"team": gc.getTeam(t1).getName(), "against": gc.getTeam(t2).getName()})
+	elif tag == "unitKilled" and a[0].getOwner() == iMe and int(a[1]) < 0 and g_window[0] == ("own", iMe):
+		# killed by nobody during our own between-turns processing: the built-in AI disbanding it
+		# (AI_doMilitary in "financial trouble") or upgrading it; put back in restoreDisbanded
+		u = a[0]
+		g_disbanded.append({"id": u.getID(), "type": u.getUnitType(), "x": u.getX(), "y": u.getY(),
+			"xp": u.getExperience(), "level": u.getLevel(), "damage": u.getDamage(),
+			"promos": [k for k in range(gc.getNumPromotionInfos()) if u.isHasPromotion(k)],
+			"turn": gc.getGame().getGameTurn()})
 	elif tag == "greatPersonBorn" and a[1] == iMe:
 		writeEvent("great_person", {"unit": gc.getUnitInfo(a[0].getUnitType()).getType(), "city": a[2].getName(),
 			"id": a[0].getID()})
@@ -1451,9 +1459,41 @@ def guardChoices():
 			if not undone:
 				undone.append("%d turns of anarchy" % extra)
 	restoreCityQueues(p)
+	restoreDisbanded(p)
 	if undone:
 		writeEvent("ai_change_undone", {"undone": undone,
 			"note": "the built-in AI changed this without your order; the bridge put it back"})
+
+g_disbanded = []
+
+def restoreDisbanded(p):
+	if not g_disbanded or g_window[0] == ("own", getClaudePlayer()):
+		return
+	claims = loadClaims()
+	back = []
+	while g_disbanded:
+		d = g_disbanded.pop(0)
+		pl = CyMap().plot(d["x"], d["y"])
+		upgraded = [pl.getUnit(k) for k in range(pl.getNumUnits()) if pl.getUnit(k).getOwner() == p.getID()
+			and pl.getUnit(k).getUnitType() != d["type"] and pl.getUnit(k).getExperience() == d["xp"]
+			and pl.getUnit(k).getLevel() == d["level"] and pl.getUnit(k).getGameTurnCreated() >= d["turn"] - 1]
+		if upgraded:
+			continue
+		u = p.initUnit(d["type"], d["x"], d["y"], UnitAITypes.NO_UNITAI, DirectionTypes.DIRECTION_SOUTH)
+		u.setExperience(d["xp"], -1)
+		u.setLevel(d["level"])
+		for k in d["promos"]:
+			u.setHasPromotion(k, True)
+		u.setDamage(d["damage"], -1)
+		if claims.has_key(d["id"]):
+			claims[u.getID()] = claims[d["id"]]
+			del claims[d["id"]]
+		back.append("%s #%d disbanded at (%d,%d), back as #%d" % (gc.getUnitInfo(d["type"]).getDescription(),
+			d["id"], d["x"], d["y"], u.getID()))
+	if back:
+		saveClaims(claims)
+		writeEvent("ai_change_undone", {"undone": back,
+			"note": "the built-in AI disbanded these to save gold; the bridge put them back (they still cost upkeep)"})
 
 def restoreCityQueues(p):
 	# the game empties a city's queue whenever its AI re-plans production (civics, techs...), and in
@@ -1743,7 +1783,10 @@ def checkpoint(window):
 	if ended:
 		kind, who = ended
 	if kind in ("own", "pre", "active"):
-		return   # research, upkeep, unit moves (huts...): nobody deals with us there
+		# research, upkeep, unit moves (huts...): nobody deals with us there, but the game's
+		# team AI can end a war with "another AI" (us) on its own, with no deal: CvTeamAI::AI_doWar
+		findDeals(old, new, "team_ai", who, True)
+		return
 	findDeals(old, new, kind, who)
 
 def checkpointTick():
@@ -1759,10 +1802,13 @@ def checkpointTick():
 		if g_snapTick[0] % 40 == 0:
 			checkpoint(("human", hs[0]))
 
-def findDeals(old, new, kind, who):
+def findDeals(old, new, kind, who, onlyTreaties=False):
 	iMe = getClaudePlayer()
 	recs = {}
 	notes = []
+	if onlyTreaties:
+		new = dict(new)
+		new["deals"], new["techs"], new["theirs"], new["mem"], new["gold"] = old["deals"], old["techs"], old["theirs"], old["mem"], old["gold"]
 	def rec(i):
 		if not recs.has_key(i):
 			recs[i] = {"with": i, "we_gave": [], "we_got": [], "deal_ids": [], "techs_given": [], "techs_got": [],
@@ -1831,12 +1877,17 @@ def findDeals(old, new, kind, who):
 		r["how"] = "the game's diplomacy screen"
 		if kind == "diplo":
 			r["how"] = "%s's proposal during their turn" % pname(i)
+		elif kind == "team_ai":
+			r["how"] = ("%s's AI ended the war on its own between turns (the game lets an AI do that to another "
+				"AI without asking; it never does it to a human)" % pname(i))
 		o["open"][str(n)] = r
 		d = {"n": n, "with": pname(i), "how": r["how"], "we_gave": r["we_gave"] or ["nothing"], "we_got": r["we_got"] or ["nothing"],
 			"note": "the built-in AI agreed to this for us; it waits for your seal: `civ ratify %d` keeps it, "
 				"`civ reject %d` undoes it" % (n, n)}
-		if r["permanent"]:
-			d["can't_be_undone"] = r["permanent"]
+		if [x for x in r["permanent"] if not x.startswith("peace")]:
+			d["can't_be_undone"] = [x for x in r["permanent"] if not x.startswith("peace")]
+		if [x for x in r["permanent"] if x.startswith("peace")]:
+			d["peace"] = "rejecting it puts the war back (no grudge from anyone; but the war counts as new, so %s refuses to talk again for a while)" % pname(i)
 		if notes:
 			d["also"] = notes
 		writeEvent("native_deal", d)
@@ -1865,6 +1916,23 @@ def cmdRatify(args):
 	saveSeal(o)
 	writeEvent("deal_ratified", {"n": int(n), "deal": sealLine(n, r)})
 	return {"ratified": sealLine(n, r)}
+
+def memorySnapshot():
+	# every leader's memory of every other: a quiet undo must not leave grudges behind
+	alive = [i for i in range(gc.getMAX_CIV_PLAYERS()) if gc.getPlayer(i).isAlive()]
+	snap = {}
+	for a in alive:
+		for b in alive:
+			if a != b:
+				snap[(a, b)] = [gc.getPlayer(a).AI_getMemoryCount(b, m) for m in range(MemoryTypes.NUM_MEMORY_TYPES)]
+	return snap
+
+def memoryRestore(snap):
+	for (a, b), counts in snap.items():
+		for m in range(len(counts)):
+			now = gc.getPlayer(a).AI_getMemoryCount(b, m)
+			if now != counts[m]:
+				gc.getPlayer(a).AI_changeMemoryCount(b, m, counts[m] - now)
 
 def cmdReject(args):
 	iMe = getClaudePlayer()
@@ -1913,6 +1981,16 @@ def cmdReject(args):
 		them.changeGold(-back)
 		me.changeGold(back)
 		done.append("got back %d gold" % back)
+	for x2 in [x2 for x2 in left if x2.startswith("peace")]:
+		left.remove(x2)
+		tt = them.getTeam()
+		if gc.getTeam(me.getTeam()).isAtWar(tt):
+			done.append("already at war with %s" % pname(x))
+		else:
+			mem = memorySnapshot()
+			gc.getTeam(me.getTeam()).declareWar(tt, False, WarPlanTypes.WARPLAN_TOTAL)
+			memoryRestore(mem)
+			done.append("war with %s again (the peace was never ours)" % pname(x))
 	del o["open"][n]
 	saveSeal(o)
 	refreshSnapshot()
