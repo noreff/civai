@@ -1,4 +1,4 @@
-# Claude играет в Civilization IV: BtS — что мы строим
+# CIVAI — Claude играет в Civilization IV: BtS
 
 ## Цель
 

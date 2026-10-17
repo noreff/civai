@@ -2,7 +2,7 @@
 """Render a ClaudeBridge state dump into a PNG map + a short text summary.
 
 Usage: render_map.py [state.json] [out_dir]
-Defaults: the latest dump in the civ4 CrossOver bottle -> ~/civ4-claude/out/
+Defaults: the latest dump in the civ4 CrossOver bottle -> out/ next to this script
 """
 import json
 import re
@@ -14,7 +14,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 BRIDGE = os.path.expanduser(
     "~/Library/Application Support/CrossOver/Bottles/civ4/drive_c/claude_bridge")
-OUT = os.path.expanduser("~/civ4-claude/out")
+OUT = os.path.join(os.path.dirname(os.path.realpath(__file__)), "out")
 
 TILE = 18
 MARGIN = 28
