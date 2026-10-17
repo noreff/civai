@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 38
+BRIDGE_VERSION = 39
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1442,12 +1442,42 @@ def guardChoices():
 		if now["civics"][o] != want["civics"][o]:
 			p.setCivics(o, want["civics"][o])
 			undone.append("civic %s" % gc.getCivicInfo(now["civics"][o]).getDescription())
-	if undone:
-		extra = p.getAnarchyTurns() - int(want.get("own_anarchy", 0))
+	if undone or p.isAnarchy():
+		# anarchy Claude didn't cause (an AI revolution, even one already undone) is taken away
+		now = gc.getGame().getGameTurn()
+		extra = p.getAnarchyTurns() - max(0, int(want.get("own_anarchy_until", 0)) - now)
 		if extra > 0:
 			p.changeAnarchyTurns(-extra)
+			if not undone:
+				undone.append("%d turns of anarchy" % extra)
+	restoreCityQueues(p)
+	if undone:
 		writeEvent("ai_change_undone", {"undone": undone,
 			"note": "the built-in AI changed this without your order; the bridge put it back"})
+
+def restoreCityQueues(p):
+	# the game empties a city's queue whenever its AI re-plans production (civics, techs...), and in
+	# anarchy it never asks the bridge to put Claude's list back: do it here
+	d = loadCityClaims()
+	(c, it) = p.firstCity(False)
+	while c and not c.isNone():
+		q = d.get(cityKey(c))
+		if q and c.getOrderQueueLength() == 0:
+			for (order, data) in q:
+				c.pushOrder(OrderTypes(order), data, -1, False, False, True, False)
+		(c, it) = p.nextCity(it, False)
+
+def saveOwnChoice(p, anarchy):
+	# Claude's own change: remember it, and until when its anarchy and the game's lock last
+	c = loadChoices() or {}
+	c.update(currentChoices(p))
+	now = gc.getGame().getGameTurn()
+	c["own_anarchy_until"] = now + p.getAnarchyTurns()
+	if anarchy is not None:
+		lock = max(1, ((100 + p.getAnarchyModifier()) * gc.getDefineINT("MIN_REVOLUTION_TURNS")) / 100) + anarchy
+		c["own_lock_until"] = now + lock
+	c.pop("own_anarchy", None)
+	saveChoices(c)
 
 def religionName(r):
 	if r < 0:
@@ -1473,10 +1503,15 @@ def cmdReligion(args):
 		raise Exception("can't adopt %s now (not in our cities, already ours, anarchy, or too soon after the last change)" % religionName(r))
 	anarchy = p.getReligionAnarchyLength()
 	p.convert(r)
-	c = currentChoices(p)
-	c["own_anarchy"] = p.getAnarchyTurns()
-	saveChoices(c)
+	saveOwnChoice(p, None)
 	return {"state_religion": religionName(p.getStateReligion()), "anarchy_turns": anarchy}
+
+def ownCivicsLock(p):
+	# the game's rule after Claude's own change (anarchy, then MIN_REVOLUTION_TURNS); a lock the
+	# built-in AI caused with a revolution the bridge undid doesn't count
+	c = loadChoices() or {}
+	now = gc.getGame().getGameTurn()
+	return max(0, int(c.get("own_lock_until", 0)) - now, int(c.get("own_anarchy_until", 0)) - now)
 
 def cmdCivics(args):
 	# no names: show current civics and what we could adopt; names: switch to them
@@ -1487,7 +1522,7 @@ def cmdCivics(args):
 				for o in range(len(cur))],
 			"can_adopt": [gc.getCivicInfo(c).getDescription() for c in range(gc.getNumCivicInfos())
 				if p.canDoCivics(c) and c not in cur],
-			"turns_until_allowed": p.getRevolutionTimer()}
+			"turns_until_allowed": ownCivicsLock(p)}
 	new = list(cur)
 	for n in args["names"]:
 		c = findInfo(n, gc.getNumCivicInfos(), gc.getCivicInfo, "civic_")
@@ -1499,17 +1534,15 @@ def cmdCivics(args):
 		new[gc.getCivicInfo(c).getCivicOptionType()] = c
 	if new == cur:
 		raise Exception("those are our civics already")
-	if p.getRevolutionTimer() > 0 or p.isAnarchy():
-		raise Exception("too soon to change civics again (%d turns), or in anarchy" % p.getRevolutionTimer())
+	if ownCivicsLock(p) > 0:
+		raise Exception("too soon to change civics again (%d turns), or in anarchy" % ownCivicsLock(p))
 	anarchy = p.getCivicAnarchyLength(new)
 	for o in range(len(new)):
 		if new[o] != cur[o]:
 			p.setCivics(o, new[o])
 	if anarchy > 0:
 		p.changeAnarchyTurns(anarchy)
-	c = currentChoices(p)
-	c["own_anarchy"] = p.getAnarchyTurns()
-	saveChoices(c)
+	saveOwnChoice(p, anarchy)
 	return {"civics": [gc.getCivicInfo(x).getDescription() for x in new], "anarchy_turns": anarchy}
 
 # ------------------------------------------------- the budget slider is Claude's
