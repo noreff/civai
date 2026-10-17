@@ -86,10 +86,10 @@ def brief(events, chat, reasons):
              "## Since your last wake-up", ""]
     shown = [fmt_event(e) for e in events if e.get("kind") not in NOISE]
     parts += shown[-40:] or ["(no game events)"]
-    parts += ["", "## Chat (the last %d lines; NEW = since your last wake-up)" % CHAT_LINES, ""]
+    parts += ["", "## Chat (the last %d lines; NEW = the human wrote it since your last wake-up)" % CHAT_LINES, ""]
     new_ids = set(json.dumps(c, sort_keys=True) for c in chat)
     recent, _ = read_from(CHAT, 0)
-    parts += ["%sT%s %s: %s" % ("NEW " if json.dumps(c, sort_keys=True) in new_ids else "    ", c.get("turn"),
+    parts += ["%sT%s %s: %s" % ("NEW " if json.dumps(c, sort_keys=True) in new_ids and c.get("from") != "claude" else "    ", c.get("turn"),
               "you" if c.get("from") == "claude" else "the human", c.get("text")) for c in recent[-CHAT_LINES:]] or ["(none)"]
     parts += ["", "## Your last wake-ups (what you did)", ""]
     parts += recent_wakes(3) or ["(none)"]
