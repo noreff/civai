@@ -4,6 +4,7 @@
   - a wake-up (claude_wake / player_waiting) the playing agent hasn't answered for a while
   - `civ py` code that looks at other players (possible peeking past the fog of war)
   - errors in the bridge log
+  - a game session trying civ py (refused unless marked as the director's, CIV_DEV=1)
 It also drops a marker into the running recording (`rec mark`) on key game events,
 silently, so editing can jump straight to them.
 
@@ -117,6 +118,8 @@ def main():
             k = d.get("kind")
             if k == "message_from_player":
                 log_chat_wall(d)
+            if k == "exec_refused":
+                say("EXEC REFUSED (a game session tried civ py): " + str(d.get("code"))[:200])
             if k in MARK_KINDS:
                 rec_mark("T%s %s" % (d.get("turn"), MARK_KINDS[k](d)))
             if k in ("claude_wake", "player_waiting") and pending is None:

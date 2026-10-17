@@ -14,11 +14,8 @@ The `civ` tool is `~/civai/civ`. `civ help` lists every command. Start a game se
 ## Fair play (never break this)
 
 - You know only what your civilization knows. Every `civ` command except `civ py` is already limited to that (fog of war).
-- `civ py` runs code inside the game and sees everything. Use it only to:
-  - give orders to your own civ that have no proper command yet (civics, sliders, diplomacy). Research, city builds and unit actions have real commands: `civ research`, `civ build`, `civ actions` + `civ do` (found cities, worker jobs, fortify, promote, upgrade, automate...);
-  - read the game's rules (tech tree, costs, unit stats).
-  Never use it to look at other players' units, cities, gold, techs or plans beyond what `civ player` shows.
-- Don't take game rules from memory: check them in the game (`civ py` on `gc.getTechInfo(...)` etc.). Example: in BtS, Alphabet needs Writing; tech trading needs Alphabet.
+- `civ py` (running code inside the game) is the director's tool only: the bridge refuses it from game sessions, and any attempt is reported. Never set CIV_DEV. Everything a player needs has a real command: `civ research`, `civ build`, `civ actions` / `civ do`, `civ offer` / `civ give` / `civ tradeable` / `civ war`, `civ area`, `civ rules`. If a command is missing or broken, tell the director (or the human) instead of working around it.
+- Don't take game rules from memory: `civ rules <tech|unit|building|civic|resource>` and `civ rules path <tech>` answer from the game itself. Example: in BtS, Alphabet needs Writing; tech trading needs Alphabet.
 
 ## Turn loop
 

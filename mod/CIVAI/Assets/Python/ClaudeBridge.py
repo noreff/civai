@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 25
+BRIDGE_VERSION = 26
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1513,6 +1513,125 @@ def cmdWar(args):
 	gc.getTeam(iTeam).declareWar(other, True, WarPlanTypes.WARPLAN_TOTAL)
 	return {"war_declared_on": gc.getTeam(other).getName()}
 
+
+def cmdTradeable(args):
+	# what each side could put on the table right now -- the same as the game's trade screen
+	iMe, iTeam = myIds()
+	other = findPlayer(args["player"])
+	if not gc.getTeam(iTeam).isHasMet(gc.getPlayer(other).getTeam()):
+		raise Exception("we haven't met %s" % args["player"])
+	def side(a, b):
+		out = []
+		pa = gc.getPlayer(a)
+		for t in range(gc.getNumTechInfos()):
+			try:
+				if gc.getTeam(pa.getTeam()).isHasTech(t) and pa.canTradeItem(b, tradeData(("tech", t)), False):
+					out.append("tech:" + gc.getTechInfo(t).getDescription())
+			except:
+				pass
+		if pa.getGold() > 0 and pa.canTradeItem(b, tradeData(("gold", 1)), False):
+			out.append("gold (up to %d)" % pa.getGold())
+		for k in ("open_borders", "defensive_pact"):
+			if pa.canTradeItem(b, tradeData((k, -1)), False):
+				out.append(k)
+		if gc.getTeam(pa.getTeam()).isAtWar(gc.getPlayer(b).getTeam()):
+			out.append("peace")
+		return out
+	d = {"with": pname(other), "we_can_give": side(iMe, other), "they_can_give": side(other, iMe)}
+	if not gc.getPlayer(other).isHuman():
+		d["their_attitude"] = gc.getAttitudeInfo(gc.getPlayer(other).AI_getAttitude(iMe)).getDescription()
+	return d
+
+# ------------------------------------------------------------------------ rules
+#
+# Game rules straight from the game (exact for this install and mod), so the player
+# never has to rely on memory: techs, units, buildings, civics, improvements, resources.
+
+def techList(ids):
+	return [gc.getTechInfo(i).getDescription() for i in ids if i >= 0]
+
+def cmdRules(args):
+	iMe, iTeam = myIds()
+	me, team = gc.getPlayer(iMe), gc.getTeam(iTeam)
+	want = args["name"]
+	if args.get("path"):
+		t = findInfo(want, gc.getNumTechInfos(), gc.getTechInfo, "tech_")
+		if t < 0:
+			raise Exception("no tech called %s" % want)
+		need, seen = [], {}
+		def walk(i):
+			if i < 0 or seen.has_key(i) or team.isHasTech(i):
+				return
+			seen[i] = 1
+			info = gc.getTechInfo(i)
+			for k in range(gc.getNUM_AND_TECH_PREREQS()):
+				walk(info.getPrereqAndTechs(k))
+			ors = [info.getPrereqOrTechs(k) for k in range(gc.getNUM_OR_TECH_PREREQS()) if info.getPrereqOrTechs(k) >= 0]
+			if ors and not [o for o in ors if team.isHasTech(o)]:
+				ors.sort(lambda a, b: cmp(team.getResearchCost(a), team.getResearchCost(b)))
+				walk(ors[0])   # cheapest way through an "or"
+			need.append(i)
+		walk(t)
+		rate = max(1, me.calculateResearchRate(-1))
+		total = sum([team.getResearchCost(i) - team.getResearchProgress(i) for i in need])
+		return {"path_to": gc.getTechInfo(t).getDescription(), "techs_in_order": techList(need),
+			"beakers": total, "turns_at_current_rate": total / rate + 1}
+	i = findInfo(want, gc.getNumTechInfos(), gc.getTechInfo, "tech_")
+	if i >= 0:
+		info = gc.getTechInfo(i)
+		return {"tech": info.getDescription(), "we_have_it": team.isHasTech(i),
+			"cost_for_us": team.getResearchCost(i), "turns_for_us": me.getResearchTurnsLeft(i, True),
+			"needs_all_of": techList([info.getPrereqAndTechs(k) for k in range(gc.getNUM_AND_TECH_PREREQS())]),
+			"needs_one_of": techList([info.getPrereqOrTechs(k) for k in range(gc.getNUM_OR_TECH_PREREQS())]),
+			"era": gc.getEraInfo(info.getEra()).getDescription(),
+			"units": [gc.getUnitInfo(u).getDescription() for u in range(gc.getNumUnitInfos()) if gc.getUnitInfo(u).getPrereqAndTech() == i],
+			"buildings": [gc.getBuildingInfo(b).getDescription() for b in range(gc.getNumBuildingInfos()) if gc.getBuildingInfo(b).getPrereqAndTech() == i],
+			"worker_builds": [gc.getBuildInfo(b).getDescription() for b in range(gc.getNumBuildInfos()) if gc.getBuildInfo(b).getTechPrereq() == i],
+			"civics": [gc.getCivicInfo(c).getDescription() for c in range(gc.getNumCivicInfos()) if gc.getCivicInfo(c).getTechPrereq() == i],
+			"reveals": [gc.getBonusInfo(b).getDescription() for b in range(gc.getNumBonusInfos()) if gc.getBonusInfo(b).getTechReveal() == i],
+			"leads_to": [gc.getTechInfo(t).getDescription() for t in range(gc.getNumTechInfos())
+				if i in [gc.getTechInfo(t).getPrereqAndTechs(k) for k in range(gc.getNUM_AND_TECH_PREREQS())]
+				+ [gc.getTechInfo(t).getPrereqOrTechs(k) for k in range(gc.getNUM_OR_TECH_PREREQS())]],
+			"strategy": info.getStrategy()}
+	i = findInfo(want, gc.getNumUnitInfos(), gc.getUnitInfo, "unit_")
+	if i >= 0:
+		info = gc.getUnitInfo(i)
+		bonuses = []
+		if info.getPrereqAndBonus() >= 0:
+			bonuses = [gc.getBonusInfo(info.getPrereqAndBonus()).getDescription()]
+		orb = [gc.getBonusInfo(info.getPrereqOrBonuses(k)).getDescription() for k in range(gc.getNUM_UNIT_PREREQ_OR_BONUSES()) if info.getPrereqOrBonuses(k) >= 0]
+		return {"unit": info.getDescription(), "strength": info.getCombat(), "moves_per_turn": info.getMoves(),
+			"cost": me.getUnitProductionNeeded(i), "needs_techs": techList([info.getPrereqAndTech()] +
+				[info.getPrereqAndTechs(k) for k in range(gc.getNUM_UNIT_AND_TECH_PREREQS())]),
+			"needs_resource": bonuses, "needs_one_resource_of": orb,
+			"we_can_build_it": me.canTrain(i, False, False), "strategy": info.getStrategy(), "help": info.getHelp()}
+	i = findInfo(want, gc.getNumBuildingInfos(), gc.getBuildingInfo, "building_")
+	if i >= 0:
+		info = gc.getBuildingInfo(i)
+		return {"building": info.getDescription(), "cost": me.getBuildingProductionNeeded(i),
+			"needs_tech": techList([info.getPrereqAndTech()]), "obsolete_with": techList([info.getObsoleteTech()]),
+			"happiness": info.getHappiness(), "health": info.getHealth(), "strategy": info.getStrategy(), "help": info.getHelp()}
+	i = findInfo(want, gc.getNumCivicInfos(), gc.getCivicInfo, "civic_")
+	if i >= 0:
+		info = gc.getCivicInfo(i)
+		upkeep = "none"
+		if info.getUpkeep() >= 0:
+			upkeep = gc.getUpkeepInfo(info.getUpkeep()).getDescription()
+		return {"civic": info.getDescription(), "category": gc.getCivicOptionInfo(info.getCivicOptionType()).getDescription(),
+			"needs_tech": techList([info.getTechPrereq()]), "upkeep": upkeep,
+			"we_can_adopt": me.canDoCivics(i), "strategy": info.getStrategy(), "help": info.getHelp()}
+	i = findInfo(want, gc.getNumBuildInfos(), gc.getBuildInfo, "build_")
+	if i >= 0:
+		info = gc.getBuildInfo(i)
+		return {"worker_build": info.getDescription(), "needs_tech": techList([info.getTechPrereq()]), "turns_of_work": info.getTime() / 100}
+	i = findInfo(want, gc.getNumBonusInfos(), gc.getBonusInfo, "bonus_")
+	if i >= 0:
+		info = gc.getBonusInfo(i)
+		return {"resource": info.getDescription(), "revealed_by": techList([info.getTechReveal()]),
+			"usable_with": techList([info.getTechCityTrade()]), "happiness": info.getHappiness(), "health": info.getHealth(),
+			"we_have_it": me.getNumAvailableBonuses(i)}
+	raise Exception("nothing called %s among techs, units, buildings, civics, worker builds, resources" % want)
+
 def aiDoDiplo(gu, argsList):
 	if argsList[0] == getClaudePlayer():
 		return True
@@ -1863,6 +1982,12 @@ def execAllowed():
 		pass
 	return True
 
+def cmdExecGuard(args, req):
+	# civ py sees everything: only requests marked as coming from the director (CIV_DEV=1) run it
+	if not req.get("dev"):
+		writeEvent("exec_refused", {"code": (args.get("code") or "")[:200]})
+		raise Exception("civ py is for the director only (game sessions use civ research/build/do/offer/rules/...)")
+
 def cmdExec(args):
 	if not execAllowed():
 		raise Exception("exec is switched off in config.txt (fair play mode)")
@@ -1897,6 +2022,8 @@ COMMANDS = {
 	"actions": cmdActions,
 	"offer": cmdOffer,
 	"offers": cmdOffers,
+	"tradeable": cmdTradeable,
+	"rules": cmdRules,
 	"war": cmdWar,
 	"do": cmdDo,
 	"build": cmdBuild,
@@ -1929,6 +2056,8 @@ def handleRequest(name):
 			if gc.getPlayer(int(req["player"])).isHuman():
 				raise Exception("player %s is a human: agents can only act for AI-controlled civs" % req["player"])
 			g_acting[0] = int(req["player"])
+		if cmd == "exec":
+			cmdExecGuard(req.get("args") or {}, req)
 		try:
 			reply = {"id": rid, "ok": True, "result": COMMANDS[cmd](req.get("args") or {})}
 		finally:
