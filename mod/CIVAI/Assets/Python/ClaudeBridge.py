@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 28
+BRIDGE_VERSION = 29
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1250,6 +1250,123 @@ def cmdDo(args):
 
 
 
+
+# ------------------------------------------------- state religion and civics are Claude's
+#
+# The built-in AI adopts state religions and changes civics for its civ on its own, and
+# the game offers no hook to stop it. So the bridge remembers what Claude chose and puts
+# back any change Claude didn't order (cancelling the anarchy it caused). Claude changes
+# them with `civ religion` / `civ civics`, paying the normal anarchy.
+
+CHOICES_FILE = OUT_DIR + "\\choices.json"
+g_guardTick = [0]
+
+def currentChoices(p):
+	return {"religion": p.getStateReligion(),
+		"civics": [p.getCivics(o) for o in range(gc.getNumCivicOptionInfos())]}
+
+def loadChoices():
+	if not os.path.exists(CHOICES_FILE):
+		return None
+	f = open(CHOICES_FILE, "rb")
+	try:
+		return fromJson(f.read())
+	finally:
+		f.close()
+
+def saveChoices(c):
+	writeAtomic(CHOICES_FILE, toJson(c))
+
+def guardChoices():
+	g_guardTick[0] = g_guardTick[0] + 1
+	if g_guardTick[0] % 25:
+		return
+	p = gc.getPlayer(getClaudePlayer())
+	if not p.isAlive():
+		return
+	want = loadChoices()
+	now = currentChoices(p)
+	if want is None:
+		saveChoices(now)   # start from whatever the civ has now
+		return
+	undone = []
+	if now["religion"] != want["religion"]:
+		p.setLastStateReligion(want["religion"])
+		undone.append("state religion %s" % religionName(now["religion"]))
+	for o in range(len(want["civics"])):
+		if now["civics"][o] != want["civics"][o]:
+			p.setCivics(o, want["civics"][o])
+			undone.append("civic %s" % gc.getCivicInfo(now["civics"][o]).getDescription())
+	if undone:
+		extra = p.getAnarchyTurns() - int(want.get("own_anarchy", 0))
+		if extra > 0:
+			p.changeAnarchyTurns(-extra)
+		writeEvent("ai_change_undone", {"undone": undone,
+			"note": "the built-in AI changed this without your order; the bridge put it back"})
+
+def religionName(r):
+	if r < 0:
+		return "none"
+	return gc.getReligionInfo(r).getDescription()
+
+def cmdReligion(args):
+	# no name: show the options; a name (or "none"): convert, with the game's normal anarchy
+	p = gc.getPlayer(getClaudePlayer())
+	have = [r for r in range(gc.getNumReligionInfos()) if p.getHasReligionCount(r) > 0]
+	if not args.get("name"):
+		return {"state_religion": religionName(p.getStateReligion()),
+			"in_our_cities": ["%s (%d cities)" % (religionName(r), p.getHasReligionCount(r)) for r in have],
+			"anarchy_if_we_convert": p.getReligionAnarchyLength(),
+			"can_convert_now": [religionName(r) for r in have + [-1] if p.canConvert(r)]}
+	w = args["name"].strip().lower()
+	r = -1
+	if w != "none":
+		r = findInfo(w, gc.getNumReligionInfos(), gc.getReligionInfo, "religion_")
+		if r < 0:
+			raise Exception("no religion called %s" % args["name"])
+	if not p.canConvert(r):
+		raise Exception("can't adopt %s now (not in our cities, already ours, anarchy, or too soon after the last change)" % religionName(r))
+	anarchy = p.getReligionAnarchyLength()
+	p.convert(r)
+	c = currentChoices(p)
+	c["own_anarchy"] = p.getAnarchyTurns()
+	saveChoices(c)
+	return {"state_religion": religionName(p.getStateReligion()), "anarchy_turns": anarchy}
+
+def cmdCivics(args):
+	# no names: show current civics and what we could adopt; names: switch to them
+	p = gc.getPlayer(getClaudePlayer())
+	cur = [p.getCivics(o) for o in range(gc.getNumCivicOptionInfos())]
+	if not args.get("names"):
+		return {"current": ["%s: %s" % (gc.getCivicOptionInfo(o).getDescription(), gc.getCivicInfo(cur[o]).getDescription())
+				for o in range(len(cur))],
+			"can_adopt": [gc.getCivicInfo(c).getDescription() for c in range(gc.getNumCivicInfos())
+				if p.canDoCivics(c) and c not in cur],
+			"turns_until_allowed": p.getRevolutionTimer()}
+	new = list(cur)
+	for n in args["names"]:
+		c = findInfo(n, gc.getNumCivicInfos(), gc.getCivicInfo, "civic_")
+		if c < 0:
+			raise Exception("no civic called %s" % n)
+		if not p.canDoCivics(c):
+			raise Exception("we can't adopt %s (needs %s?)" % (gc.getCivicInfo(c).getDescription(),
+				", ".join(techList([gc.getCivicInfo(c).getTechPrereq()])) or "something else"))
+		new[gc.getCivicInfo(c).getCivicOptionType()] = c
+	if new == cur:
+		raise Exception("those are our civics already")
+	if p.getRevolutionTimer() > 0 or p.isAnarchy():
+		raise Exception("too soon to change civics again (%d turns), or in anarchy" % p.getRevolutionTimer())
+	anarchy = p.getCivicAnarchyLength(new)
+	for o in range(len(new)):
+		if new[o] != cur[o]:
+			p.setCivics(o, new[o])
+	if anarchy > 0:
+		p.changeAnarchyTurns(anarchy)
+	c = currentChoices(p)
+	c["own_anarchy"] = p.getAnarchyTurns()
+	saveChoices(c)
+	return {"civics": [gc.getCivicInfo(x).getDescription() for x in new], "anarchy_turns": anarchy}
+
 # ------------------------------------------------- deals made in the game's own screen
 #
 # When the human trades with Claude's civ through the normal diplomacy screen, the
@@ -1956,7 +2073,7 @@ def setReady(byWhom):
 
 ATTENTION_KINDS = ("first_contact", "war_declared", "peace_made", "city_founded", "city_changed_hands",
 	"city_razed", "combat", "tech_learned", "building_built", "project_built", "religion_founded",
-	"great_person", "golden_age", "unit_arrived", "unit_done", "deal_done", "deal_declined", "deal_failed", "native_deal")
+	"great_person", "golden_age", "unit_arrived", "unit_done", "deal_done", "deal_declined", "deal_failed", "native_deal", "ai_change_undone")
 
 def noteAttention(kind):
 	g = readGate()
@@ -2133,6 +2250,8 @@ COMMANDS = {
 	"offer": cmdOffer,
 	"offers": cmdOffers,
 	"tradeable": cmdTradeable,
+	"religion": cmdReligion,
+	"civics": cmdCivics,
 	"rules": cmdRules,
 	"war": cmdWar,
 	"do": cmdDo,
@@ -2196,6 +2315,10 @@ def poll():
 		if not os.path.isdir(REPLY_DIR):
 			os.makedirs(REPLY_DIR)
 		if gameReady():
+			try:
+				guardChoices()
+			except:
+				log("choices guard FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 			try:
 				checkNativeDeal()
 			except:

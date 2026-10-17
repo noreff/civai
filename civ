@@ -26,6 +26,10 @@
   civ rules <name>         the game's rules for a tech, unit, building, civic, worker build
                            or resource (cost, requirements, what it unlocks, strategy text)
   civ rules path <tech>    the techs still needed to reach <tech>, in order, with turns
+  civ religion [name|none]  state religion: options, or adopt one (normal anarchy)
+  civ civics [civic]...    civics: current and possible, or switch to the named civics
+                           (the built-in AI can't change religion or civics for us: the
+                           bridge undoes its changes, event ai_change_undone)
   civ war <player>         declare war (only Claude declares wars for its civ)
   civ area X Y [R]         text map of the region around X Y (radius R, default 6) with cities,
                            resources, foreign units, borders, and the best city sites there
@@ -368,6 +372,10 @@ def main(argv):
                 print(fmt_record(call("rules", {"name": " ".join(argv[2:]), "path": True})))
             else:
                 print(fmt_record(call("rules", {"name": " ".join(argv[1:])})))
+        elif cmd == "religion":
+            print(fmt_record(call("religion", {"name": " ".join(argv[1:])} if len(argv) > 1 else {})))
+        elif cmd == "civics":
+            print(fmt_record(call("civics", {"names": argv[1:]} if len(argv) > 1 else {})))
         elif cmd == "offers":
             print(fmt_record(call("offers")))
         elif cmd == "war":

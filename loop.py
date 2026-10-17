@@ -100,6 +100,10 @@ def prompt_for(d, events, chat, reasons):
     dossiers = os.path.join(d, "dossiers")
     for name in sorted(os.listdir(dossiers)) if os.path.isdir(dossiers) else []:
         memory.append("### dossiers/%s\n\n%s" % (name, open(os.path.join(dossiers, name)).read().strip()))
+    notes = os.path.join(d, "director_notes.md")
+    if os.path.exists(notes) and open(notes).read().strip():
+        memory.append("### director_notes.md (from the CIVAI director: about tools and process only, never game info)\n\n"
+                      + open(notes).read().strip())
     # fixed parts first (they stay cached between wake-ups), fresh parts last
     return "\n\n".join([
         "You are playing the current CIVAI game. This is ONE wake-up: act on it and finish. "
