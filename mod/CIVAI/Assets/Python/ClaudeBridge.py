@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 15
+BRIDGE_VERSION = 16
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -957,7 +957,7 @@ def cmdSay(args):
 	else:
 		# bright and a size bigger; a "major event" stays in the event log (Ctrl+Tab) for good,
 		# a chat-type line would drop out after 20 turns
-		line = u"<font=3><color=255,200,60,255>[%s to you]:  %s</color></font>" % (me.getName(), text)
+		line = u"<font=4><color=255,200,60,255>[%s to you]:  %s</color></font>" % (me.getName(), text)
 		for i in range(gc.getMAX_CIV_PLAYERS()):
 			if gc.getPlayer(i).isAlive() and gc.getPlayer(i).isHuman():
 				CyInterface().addMessage(i, True, gc.getEVENT_MESSAGE_TIME() * 3, line, "",

@@ -4,6 +4,8 @@
   - a wake-up (claude_wake / player_waiting) the playing agent hasn't answered for a while
   - `civ py` code that looks at other players (possible peeking past the fog of war)
   - errors in the bridge log
+It also drops a marker into the running recording (`rec mark`) on key game events,
+silently, so editing can jump straight to them.
 
 Usage: director_watch.py [--stuck-seconds N]   (meant to run under a monitor; never exits)
 """
@@ -46,6 +48,28 @@ def follow(path):
         yield None
 
 
+MARK_KINDS = {
+    "first_contact": lambda d: "First contact: " + ", ".join(d.get("with", [])),
+    "war_declared": lambda d: "WAR: %s vs %s" % (d.get("team"), d.get("against")),
+    "peace_made": lambda d: "Peace: %s and %s" % (d.get("team"), d.get("against")),
+    "city_changed_hands": lambda d: "City %s: %s -> %s" % (d.get("name"), d.get("from"), d.get("to")),
+    "city_razed": lambda d: "City razed: %s by %s" % (d.get("name"), d.get("by")),
+    "great_person": lambda d: "Great person: " + str(d.get("unit")),
+    "religion_founded": lambda d: "Religion founded: %s by %s" % (d.get("religion"), d.get("by")),
+    "golden_age": lambda d: "Golden age",
+    "project_built": lambda d: "Project: %s by %s" % (d.get("project"), d.get("owner")),
+}
+
+
+def rec_mark(text):
+    env = dict(os.environ, REC_ROOT=os.path.expanduser("~/youtube/raw/civai"))
+    try:
+        subprocess.run([os.path.expanduser("~/youtube/rec/rec"), "mark", text], env=env,
+                       capture_output=True, timeout=30)
+    except Exception:
+        pass
+
+
 def say(msg):
     print(time.strftime("%H:%M:%S"), msg, flush=True)
 
@@ -79,6 +103,8 @@ def main():
             except ValueError:
                 continue
             k = d.get("kind")
+            if k in MARK_KINDS:
+                rec_mark("T%s %s" % (d.get("turn"), MARK_KINDS[k](d)))
             if k in ("claude_wake", "player_waiting") and pending is None:
                 pending, warned = (k, d.get("turn"), time.time()), False
             elif k in ("claude_ready", "auto_ready"):
