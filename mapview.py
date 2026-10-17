@@ -7,6 +7,7 @@ counting, and every fact carries its own coordinates.
 
   mapview.py brief            the "Map" section of a wake-up brief (also saves the pictures)
   mapview.py around X Y       one place and its 8 neighbours (`civ around`)
+  mapview.py where X Y [X Y..]   a place in words for someone without coordinates (`civ where`)
   mapview.py card <city>      battle card for attacking a city (`civ card`)
   mapview.py pictures [DIR]   overview + close-ups of the hot spots as PNG
 Add --state FILE to read a saved map dump instead of the live game.
@@ -147,6 +148,36 @@ def straight_path(a, b):
     return out
 
 
+WIND = {(0, 1): "north", (1, 1): "north-east", (1, 0): "east", (1, -1): "south-east",
+        (0, -1): "south", (-1, -1): "south-west", (-1, 0): "west", (-1, 1): "north-west"}
+
+
+def offset_words(src, xy):
+    """How a person counts from src to xy on screen: '2 tiles south-west' / '3 east and 1 north'."""
+    dx, dy = xy[0] - src[0], xy[1] - src[1]
+    if dx == 0 or dy == 0 or abs(dx) == abs(dy):
+        n = max(abs(dx), abs(dy))
+        return "%d tile%s %s" % (n, "" if n == 1 else "s", WIND[((dx > 0) - (dx < 0), (dy > 0) - (dy < 0))])
+    return "%d %s and %d %s" % (abs(dx), "east" if dx > 0 else "west", abs(dy), "north" if dy > 0 else "south")
+
+
+def where(xy):
+    """A place in the words of someone who sees the map but no coordinates: counted from the nearest cities."""
+    if xy in CITIES:
+        c = CITIES[xy]
+        return "the city of %s (%s)" % (c["name"], owner_name(c["owner"], short=True))
+    refs = sorted(CITIES, key=lambda c: (dist(c, xy), c))[:2]
+    if not refs:
+        return None
+    rel = ["%s of %s" % (offset_words(c, xy), CITIES[c]["name"]) for c in refs if dist(c, xy) <= 10]
+    p = PLOTS.get(xy)
+    what = ground(p).replace("HILL ", "hill, ").replace("flat ", "") if p else "a tile we never saw"
+    if p and p[5]:
+        what += ", " + nice(p[5], "BONUS_")
+    u = units_at(xy)
+    return "the %s tile %s%s" % (what, " = ".join(rel) or "far from any city we know", "; units there: " + u if u else "")
+
+
 def around(xy, title=None):
     """One place and its 8 neighbours by compass direction."""
     x, y = xy
@@ -162,6 +193,8 @@ def around(xy, title=None):
     if extra:
         head += " [" + "; ".join(extra) + "]"
     L = [head]
+    if xy not in CITIES:
+        L.append("  (to other leaders: %s)" % where(xy))
     for name, dx, dy in DIRS:
         n = (x + dx, y + dy)
         q = PLOTS.get(n)
@@ -286,6 +319,7 @@ def brief(state, pic_dir=None):
     load(state)
     spots = hot_spots()
     L = ["Every fact has its coordinates. x grows EAST, y grows NORTH: south of x,y is x,y-1. "
+         "Other leaders' screens show no coordinates: name places to them as `civ where X Y` words them. "
          "HILL = +25% defence for whoever stands there; forest/jungle +50%. Ask for more: `civ around X Y`, `civ card <city>`, `civ tile X Y`.",
          "", "### Places", "", places_and_routes()]
     if spots:
@@ -491,6 +525,10 @@ def main(argv):
     elif cmd == "around":
         xy = tuple(int(v) for v in " ".join(argv[1:3]).replace(",", " ").split()[:2])
         print(around(xy))
+    elif cmd == "where":
+        v = [int(t) for t in " ".join(argv[1:]).replace(",", " ").replace("/", " ").split()]
+        for xy in zip(v[0::2], v[1::2]):
+            print("%d,%d = %s" % (xy[0], xy[1], where(xy)))
     elif cmd == "card":
         print(battle_card(find_city(" ".join(argv[1:]))))
     elif cmd == "pictures":

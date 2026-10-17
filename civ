@@ -50,6 +50,8 @@
   civ raze <city>          burn a city we just captured (this turn or last); otherwise captured cities are kept
   civ around X Y           one place and its 8 neighbours: ground (HILL/flat, forest, river, road),
                            owner, city, resource, units; every line with its coordinates
+  civ where X Y [X Y...]   a place in words for leaders who see no coordinates: "the hill, jungle tile
+                           2 tiles south-west of Uppsala = 1 east and 2 north of Turfan"
   civ card <city>          battle card for attacking a city: the ground under it, the tiles around it
                            ranked for attackers, the approach from our nearest city, foreign units near
   civ area X Y [R]         text map of the region around X Y (radius R, default 6) with cities,
@@ -384,7 +386,7 @@ def main(argv):
             print(fmt_status(call("status")))
         elif cmd == "map":
             cmd_map(argv[1:])
-        elif cmd in ("around", "card"):
+        elif cmd in ("around", "card", "where"):
             r = subprocess.run([os.path.join(HERE, "mapview.py"), cmd] + argv[1:], capture_output=True, text=True, timeout=180)
             print((r.stdout + r.stderr).strip())
         elif cmd == "odds":

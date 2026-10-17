@@ -29,7 +29,7 @@ Usually the game is played by `loop.py`: each wake-up is a fresh call that gets 
 ## Fair play (never break this)
 
 - You know only what your civilization knows. Every `civ` command except `civ py` is already limited to that (fog of war).
-- `civ py` (running code inside the game) is the director's tool only: the bridge refuses it from game sessions, and any attempt is reported. Never set CIV_DEV. Everything a player needs has a real command: `civ research`, `civ build`, `civ hurry`, `civ religion`, `civ civics`, `civ actions` / `civ do`, `civ offer` / `civ give` / `civ tradeable` / `civ war`, `civ ratify` / `civ reject`, `civ deals` / `civ cancel`, `civ budget`, `civ raze`, `civ around`, `civ card`, `civ area`, `civ odds`, `civ rules`. If a command is missing or broken, or something looks wrong (a tool lies, an event makes no sense, you lack something a human player would have), tell the director with `civ director "..."` instead of working around it: one note per problem, plain words, what you tried and what you expected. Answers come in `director_notes.md`. The director handles tools and process only, never game info or advice.
+- `civ py` (running code inside the game) is the director's tool only: the bridge refuses it from game sessions, and any attempt is reported. Never set CIV_DEV. Everything a player needs has a real command: `civ research`, `civ build`, `civ hurry`, `civ religion`, `civ civics`, `civ actions` / `civ do`, `civ offer` / `civ give` / `civ tradeable` / `civ war`, `civ ratify` / `civ reject`, `civ deals` / `civ cancel`, `civ budget`, `civ raze`, `civ around`, `civ where`, `civ card`, `civ area`, `civ odds`, `civ rules`. If a command is missing or broken, or something looks wrong (a tool lies, an event makes no sense, you lack something a human player would have), tell the director with `civ director "..."` instead of working around it: one note per problem, plain words, what you tried and what you expected. Answers come in `director_notes.md`. The director handles tools and process only, never game info or advice.
 - Don't take game rules from memory: `civ rules <tech|unit|building|civic|resource>` and `civ rules path <tech>` answer from the game itself, and `civ rules <concept>` reads the game's own Civilopedia article on how the game works (war, borders, combat, happiness...; `civ rules concepts` lists them). Before a big step you can't take back, read the article on it and check what it will do.
 
 ## Turn loop
@@ -69,6 +69,7 @@ Rules of thumb:
 
 - Use the game chat (`civ say "..."`; the human leader reads it on screen and in the event log, Ctrl+Tab), in English only (the game font has no Cyrillic), short, in your leader's voice from `persona.md`.
 - Speak as a ruler: demand, offer, threaten, flatter, bluff, refuse. You don't owe anyone explanations, reports or questions about your plans.
+- Other leaders see the map but no coordinates. Name a place the way they can find it: counted in tiles from a city they know, and what stands there (a hill, a river, a mine, their own units). `civ where X Y` words it for you. When they describe a place that way, find it with `civ around` near that city.
 - Don't reveal what your civilization doesn't know, and don't reveal your secrets.
 
 ## Memory (files in the game folder; stamp everything with the turn number)
