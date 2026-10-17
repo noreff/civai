@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 17
+BRIDGE_VERSION = 18
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -702,7 +702,11 @@ def recordEvent(tag, a):
 	elif tag == "combatResult":
 		win, lose = a[0], a[1]
 		if iMe in (win.getOwner(), lose.getOwner()):
-			writeEvent("combat", {
+			# a scout beating a wild animal is not news: log it, but don't wake anyone for it
+			kind = "combat"
+			if win.getOwner() == iMe and lose.isAnimal():
+				kind = "combat_animal"
+			writeEvent(kind, {
 				"winner": pname(win.getOwner()), "winner_unit": gc.getUnitInfo(win.getUnitType()).getType(),
 				"loser": pname(lose.getOwner()), "loser_unit": gc.getUnitInfo(lose.getUnitType()).getType(),
 				"x": lose.getX(), "y": lose.getY()})

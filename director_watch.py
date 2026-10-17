@@ -70,6 +70,18 @@ def rec_mark(text):
         pass
 
 
+def log_chat_wall(d):
+    # the game's own clock is unreliable (128 s steps, wrong offset): stamp the player's
+    # chat lines with the Mac's clock for the video (Claude's lines are in commands.jsonl)
+    try:
+        game = open(os.path.expanduser("~/civai/games/CURRENT")).read().strip()
+        with open(os.path.expanduser("~/civai/games/%s/chat_wall.jsonl" % game), "a") as f:
+            f.write(json.dumps({"from": "player", "turn": d.get("turn"), "text": d.get("text"),
+                                "wall": time.strftime("%Y-%m-%d %H:%M:%S")}) + "\n")
+    except Exception:
+        pass
+
+
 def say(msg):
     print(time.strftime("%H:%M:%S"), msg, flush=True)
 
@@ -103,6 +115,8 @@ def main():
             except ValueError:
                 continue
             k = d.get("kind")
+            if k == "message_from_player":
+                log_chat_wall(d)
             if k in MARK_KINDS:
                 rec_mark("T%s %s" % (d.get("turn"), MARK_KINDS[k](d)))
             if k in ("claude_wake", "player_waiting") and pending is None:
