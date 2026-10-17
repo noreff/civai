@@ -12,10 +12,11 @@ import os
 import sys
 import time
 import traceback
+import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 33
+BRIDGE_VERSION = 35
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -383,6 +384,7 @@ def collectMyUnits(iMe):
 			"id": u.getID(),
 			"type": gc.getUnitInfo(u.getUnitType()).getType(),
 			"x": u.getX(), "y": u.getY(),
+			"land": u.plot().getRevealedOwner(p.getTeam(), False),
 			"moves": u.movesLeft(), "max_moves": u.maxMoves(),
 			"damage": u.getDamage(),
 			"level": u.getLevel(), "xp": u.getExperience(),
@@ -409,11 +411,11 @@ def cmdStatus(args):
 		"players": collectPlayers(iMe),
 		"my_empire": collectMyEmpire(iMe),
 		"my_units": collectMyUnits(iMe),
-		"foreign_near": collectForeignNear(iMe),
+		"foreign_seen": collectForeignSeen(iMe),
 	}
 
-def collectForeignNear(iMe):
-	# visible foreign units inside our borders or within 2 tiles of them (fog of war applies)
+def collectForeignSeen(iMe):
+	# every foreign unit we see now (fog of war applies): inside our borders, near them, or elsewhere
 	iTeam = gc.getPlayer(iMe).getTeam()
 	m = CyMap()
 	groups = {}
@@ -421,25 +423,25 @@ def collectForeignNear(iMe):
 		pl = m.plotByIndex(i)
 		if not pl.isVisible(iTeam, False) or pl.getNumUnits() == 0:
 			continue
-		inside = pl.getOwner() == iMe
-		if not inside:
-			near = False
+		land = pl.getRevealedOwner(iTeam, False)
+		if land == iMe:
+			where = "inside"
+		else:
+			where = "elsewhere"
 			for dx in range(-2, 3):
 				for dy in range(-2, 3):
 					q = m.plot(pl.getX() + dx, pl.getY() + dy)
 					if q is not None and not q.isNone() and q.getRevealedOwner(iTeam, False) == iMe:
-						near = True
-			if not near:
-				continue
+						where = "near"
 		for k in range(pl.getNumUnits()):
 			u = pl.getUnit(k)
 			if u.isNone() or u.getOwner() == iMe or u.isInvisible(iTeam, False):
 				continue
-			key = (u.getOwner(), pl.getX(), pl.getY(), inside)
+			key = (u.getOwner(), pl.getX(), pl.getY(), where, land)
 			groups.setdefault(key, []).append(gc.getUnitInfo(u.getUnitType()).getDescription())
 	out = []
-	for (o, x, y, inside), names in groups.items():
-		out.append({"owner": o, "who": pname(o), "x": x, "y": y, "inside": inside,
+	for (o, x, y, where, land), names in groups.items():
+		out.append({"owner": o, "who": pname(o), "x": x, "y": y, "where": where, "land": land,
 			"units": names, "war": gc.getTeam(iTeam).isAtWar(gc.getPlayer(o).getTeam())})
 	return out
 
@@ -2169,10 +2171,31 @@ def cmdWar(args):
 	# Claude's own declaration of war (the built-in AI no longer declares wars for this civ)
 	iMe, iTeam = myIds()
 	other = gc.getPlayer(findPlayer(args["player"])).getTeam()
-	if not gc.getTeam(iTeam).canDeclareWar(other):
+	can = gc.getTeam(iTeam).canDeclareWar(other)
+	# the game's rule: declaring war first ends every deal between us (open borders too), then
+	# every unit standing in the other side's land is moved to the nearest tile outside it
+	ours = []
+	(u, it) = gc.getPlayer(iMe).firstUnit(False)
+	while u and not u.isNone():
+		if u.getDomainType() == DomainTypes.DOMAIN_LAND and u.plot().getTeam() == other:
+			ours.append([u.getID(), gc.getUnitInfo(u.getUnitType()).getDescription(), u.getX(), u.getY()])
+		(u, it) = gc.getPlayer(iMe).nextUnit(it, False)
+	deals = [dealLine(d, o, give, get) for (d, o, give, get) in ourDeals() if gc.getPlayer(o).getTeam() == other]
+	if args.get("check"):
+		return {"check": True, "can_declare": can, "against": gc.getTeam(other).getName(),
+			"our_units_pushed_out": ours, "deals_that_end": deals}
+	if not can:
 		raise Exception("we can't declare war on %s now (peace treaty still running, or not met?)" % args["player"])
 	gc.getTeam(iTeam).declareWar(other, True, WarPlanTypes.WARPLAN_TOTAL)
-	return {"war_declared_on": gc.getTeam(other).getName()}
+	moved = []
+	for uid, name, x, y in ours:
+		u = gc.getPlayer(iMe).getUnit(uid)
+		if u is None or u.isNone():
+			moved.append("%s #%d was in their land at (%d,%d) and is gone" % (name, uid, x, y))
+		elif (u.getX(), u.getY()) != (x, y):
+			moved.append("%s #%d pushed out of their land: (%d,%d) -> (%d,%d)" % (name, uid, x, y, u.getX(), u.getY()))
+	refreshSnapshot()
+	return {"war_declared_on": gc.getTeam(other).getName(), "deals_ended": deals, "units_pushed_out": moved}
 
 
 def cmdTradeable(args):
@@ -2291,7 +2314,37 @@ def cmdRules(args):
 		return {"resource": info.getDescription(), "revealed_by": techList([info.getTechReveal()]),
 			"usable_with": techList([info.getTechCityTrade()]), "happiness": info.getHappiness(), "health": info.getHealth(),
 			"we_have_it": me.getNumAvailableBonuses(i)}
-	raise Exception("nothing called %s among techs, units, buildings, civics, worker builds, resources" % want)
+	# the game's own Civilopedia articles about how the game works (war, borders, combat, happiness...)
+	concepts = conceptList()
+	if want.strip().lower() in ("concepts", "mechanics", "list"):
+		return {"concepts": [c[0] for c in concepts],
+			"how": "civ rules <concept> reads the game's own Civilopedia article"}
+	w = want.strip().lower().replace(" ", "_")
+	for name, typ, text in concepts:
+		if w in (name.lower().replace(" ", "_"), typ.lower(), typ.lower().replace("concept_", "")):
+			return {"concept": name, "article": pediaText(text)}
+	raise Exception("nothing called %s among techs, units, buildings, civics, worker builds, resources, "
+		"concepts (civ rules concepts lists them)" % want)
+
+def conceptList():
+	out = []
+	for i in range(gc.getNumConceptInfos()):
+		c = gc.getConceptInfo(i)
+		out.append((c.getDescription(), c.getType(), c.getCivilopedia()))
+	try:
+		for i in range(gc.getNumNewConceptInfos()):
+			c = gc.getNewConceptInfo(i)
+			out.append((c.getDescription(), c.getType(), c.getCivilopedia()))
+	except:
+		pass
+	return out
+
+def pediaText(t):
+	t = re.sub(r"<link=[^>]*>", "", t)
+	t = re.sub(r"<font=[^>]*>([^<]*)</font>", r"## \1", t)
+	t = re.sub(r"</?[a-zA-Z]+[^>]*>", "", t)
+	t = re.sub(r"\n\s*\n+", "\n\n", t)
+	return t.strip()
 
 def aiDoDiplo(gu, argsList):
 	if argsList[0] == getClaudePlayer():

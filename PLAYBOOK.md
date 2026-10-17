@@ -23,7 +23,7 @@ Usually the game is played by `loop.py`: each wake-up is a fresh call that gets 
 
 - You know only what your civilization knows. Every `civ` command except `civ py` is already limited to that (fog of war).
 - `civ py` (running code inside the game) is the director's tool only: the bridge refuses it from game sessions, and any attempt is reported. Never set CIV_DEV. Everything a player needs has a real command: `civ research`, `civ build`, `civ hurry`, `civ religion`, `civ civics`, `civ actions` / `civ do`, `civ offer` / `civ give` / `civ tradeable` / `civ war`, `civ ratify` / `civ reject`, `civ deals` / `civ cancel`, `civ budget`, `civ raze`, `civ area`, `civ rules`. If a command is missing or broken, tell the director (or the human) instead of working around it.
-- Don't take game rules from memory: `civ rules <tech|unit|building|civic|resource>` and `civ rules path <tech>` answer from the game itself. Example: in BtS, Alphabet needs Writing; tech trading needs Alphabet.
+- Don't take game rules from memory: `civ rules <tech|unit|building|civic|resource>` and `civ rules path <tech>` answer from the game itself, and `civ rules <concept>` reads the game's own Civilopedia article on how the game works (war, borders, combat, happiness...; `civ rules concepts` lists them). Before a big step you can't take back, read the article on it and check what it will do.
 
 ## Turn loop
 
@@ -42,7 +42,6 @@ The game always waits for you: the human can't end a turn until you say `civ rea
 
 Rules of thumb:
 - Most wake-ups need a few commands, not a deep analysis. Think deeply on big events: contact, war, a city lost or taken, a deal offered, every review turn.
-- `civ status` lists the foreign units you see in or near your land: check it before asking an ally where their army is, and watch it for strangers at your gates.
 - Coordinates: x grows to the east, y grows to the NORTH (a smaller y is south of you).
 - Look at the land before land decisions (claims, city sites, borders, wars): `civ area X Y [R]` is a text map with resources, borders, foreign units and the best city sites the game rates. One look beats many `civ tile` calls.
 - The built-in AI runs everything you don't take over. Take over what matters: research, key builds, units with a purpose (`civ move`, `civ do`), war and peace. Settlers and workers are where words become land: pick the city site yourself (`civ area` → `civ move` → `civ do <id> FOUND`). A unit you gave a job wakes you when it's done (`unit_done`); `civ release <id>` hands it back to the built-in AI.

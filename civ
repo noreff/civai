@@ -24,13 +24,18 @@
   civ offers               open offers waiting for an answer
   civ tradeable <player>   what each side can trade right now (the game's trade screen)
   civ rules <name>         the game's rules for a tech, unit, building, civic, worker build
-                           or resource (cost, requirements, what it unlocks, strategy text)
+                           or resource (cost, requirements, what it unlocks, strategy text),
+                           or a Civilopedia article on how the game works (war, borders,
+                           combat, happiness...); `civ rules concepts` lists the articles
   civ rules path <tech>    the techs still needed to reach <tech>, in order, with turns
   civ religion [name|none]  state religion: options, or adopt one (normal anarchy)
   civ civics [civic]...    civics: current and possible, or switch to the named civics
                            (the built-in AI can't change religion or civics for us: the
                            bridge undoes its changes, event ai_change_undone)
-  civ war <player>         declare war (only Claude declares wars for its civ)
+  civ war <player> [--check]
+                           declare war (only Claude declares wars for its civ); --check only
+                           shows what it would do: deals that end, our units pushed out of
+                           their land
   civ ratify <N>           keep deal #N that the built-in AI agreed to for us (event native_deal)
   civ reject <N>           undo deal #N: ongoing parts end without a grudge, techs and gold go back
                            (peace and vassal treaties can't be undone); `civ offers` lists them
@@ -146,6 +151,13 @@ def year(y):
     return "%d BC" % -y if y < 0 else "%d AD" % y
 
 
+def land_name(owner, players):
+    if owner is None or owner < 0:
+        return "on unclaimed land"
+    p = players.get(owner)
+    return "in %s's land" % (p["name"] if p else "player %d" % owner)
+
+
 def fmt_status(s):
     me = s["me"]
     players = {p["id"]: p for p in s["players"]}
@@ -181,22 +193,26 @@ def fmt_status(s):
             flags.append("%d orders queued" % u["missions_queued"])
         if u["damage"]:
             flags.append("damaged %d%%" % u["damage"])
+        if u.get("land", me) != me:
+            flags.append(land_name(u["land"], players))
         out.append("  #%-5d %-14s (%d,%d) moves %g/%g lvl %d%s" % (
             u["id"], short(u["type"]), u["x"], u["y"], u["moves"] / MOVE, u["max_moves"] / MOVE,
             u["level"], ("  [" + ", ".join(flags) + "]") if flags else ""))
     out.append("")
-    out.append("Foreign units in or near my land (what my eyes see now):")
-    near = sorted(s.get("foreign_near", []), key=lambda g: (not g["war"], g["who"], g["x"], g["y"]))
-    for g in near:
+    out.append("Foreign units I see now:")
+    order = {"inside": 0, "near": 1, "elsewhere": 2}
+    seen = sorted(s.get("foreign_seen", []), key=lambda g: (not g["war"], order[g["where"]], g["who"], g["x"], g["y"]))
+    for g in seen:
         names = {}
         for n in g["units"]:
             names[n] = names.get(n, 0) + 1
+        where = "inside my borders" if g["where"] == "inside" else land_name(g["land"], players) + (
+            ", near my borders" if g["where"] == "near" else "")
         out.append("  %s%s at (%d,%d) %s: %s" % (
-            "[AT WAR] " if g["war"] else "", g["who"], g["x"], g["y"],
-            "inside my borders" if g["inside"] else "near my borders",
+            "[AT WAR] " if g["war"] else "", g["who"], g["x"], g["y"], where,
             ", ".join("%d %s" % (c, n) if c > 1 else n for n, c in names.items())))
-    if not near:
-        out.append("  (none seen)")
+    if not seen:
+        out.append("  (none)")
     out.append("")
     out.append("Others:")
     known = False
@@ -401,7 +417,15 @@ def main(argv):
         elif cmd == "offers":
             print(fmt_record(call("offers")))
         elif cmd == "war":
-            print(fmt_record(call("war", {"player": argv[1]})))
+            r = call("war", {"player": argv[1], "check": "--check" in argv})
+            if r.get("check"):
+                print("Declaring war on %s now: %s" % (r["against"], "possible" if r["can_declare"] else "NOT possible (peace treaty or not met)"))
+                print("Deals that end at once:" + "".join("\n  " + d for d in r["deals_that_end"]) if r["deals_that_end"] else "Deals that end at once: none")
+                print("Our units in their land, pushed out to the nearest tile outside it at once:" +
+                      "".join("\n  #%d %s (%d,%d)" % tuple(u) for u in r["our_units_pushed_out"]) if r["our_units_pushed_out"] else
+                      "Our units in their land: none")
+            else:
+                print(fmt_record(r))
         elif cmd in ("ratify", "reject"):
             print(fmt_record(call(cmd, {"n": argv[1]})))
         elif cmd == "deals":
