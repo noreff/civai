@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 32
+BRIDGE_VERSION = 33
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -409,7 +409,39 @@ def cmdStatus(args):
 		"players": collectPlayers(iMe),
 		"my_empire": collectMyEmpire(iMe),
 		"my_units": collectMyUnits(iMe),
+		"foreign_near": collectForeignNear(iMe),
 	}
+
+def collectForeignNear(iMe):
+	# visible foreign units inside our borders or within 2 tiles of them (fog of war applies)
+	iTeam = gc.getPlayer(iMe).getTeam()
+	m = CyMap()
+	groups = {}
+	for i in range(m.numPlots()):
+		pl = m.plotByIndex(i)
+		if not pl.isVisible(iTeam, False) or pl.getNumUnits() == 0:
+			continue
+		inside = pl.getOwner() == iMe
+		if not inside:
+			near = False
+			for dx in range(-2, 3):
+				for dy in range(-2, 3):
+					q = m.plot(pl.getX() + dx, pl.getY() + dy)
+					if q is not None and not q.isNone() and q.getRevealedOwner(iTeam, False) == iMe:
+						near = True
+			if not near:
+				continue
+		for k in range(pl.getNumUnits()):
+			u = pl.getUnit(k)
+			if u.isNone() or u.getOwner() == iMe or u.isInvisible(iTeam, False):
+				continue
+			key = (u.getOwner(), pl.getX(), pl.getY(), inside)
+			groups.setdefault(key, []).append(gc.getUnitInfo(u.getUnitType()).getDescription())
+	out = []
+	for (o, x, y, inside), names in groups.items():
+		out.append({"owner": o, "who": pname(o), "x": x, "y": y, "inside": inside,
+			"units": names, "war": gc.getTeam(iTeam).isAtWar(gc.getPlayer(o).getTeam())})
+	return out
 
 # ------------------------------------------------------------- queries
 #

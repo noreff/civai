@@ -185,6 +185,19 @@ def fmt_status(s):
             u["id"], short(u["type"]), u["x"], u["y"], u["moves"] / MOVE, u["max_moves"] / MOVE,
             u["level"], ("  [" + ", ".join(flags) + "]") if flags else ""))
     out.append("")
+    out.append("Foreign units in or near my land (what my eyes see now):")
+    near = sorted(s.get("foreign_near", []), key=lambda g: (not g["war"], g["who"], g["x"], g["y"]))
+    for g in near:
+        names = {}
+        for n in g["units"]:
+            names[n] = names.get(n, 0) + 1
+        out.append("  %s%s at (%d,%d) %s: %s" % (
+            "[AT WAR] " if g["war"] else "", g["who"], g["x"], g["y"],
+            "inside my borders" if g["inside"] else "near my borders",
+            ", ".join("%d %s" % (c, n) if c > 1 else n for n, c in names.items())))
+    if not near:
+        out.append("  (none seen)")
+    out.append("")
     out.append("Others:")
     known = False
     for p in sorted(players.values(), key=lambda p: p["id"]):
