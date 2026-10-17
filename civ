@@ -1,0 +1,325 @@
+#!/usr/bin/env python3
+"""civ - talk to the running Civ IV game through the ClaudeBridge mod mailbox.
+
+  civ ping                 is the game there, whose turn is it
+  civ status               compact digest of Claude's empire
+  civ map [X Y [R]]        schematic map (PNG); with X Y: zoom on a square of radius R (default 6)
+  civ tile X Y             one tile: terrain, resource, owner, yields, units
+  civ city <name>          a city: full detail if mine, what I can see if not
+  civ unit <id>            one of my units
+  civ player <name|civ|id> a player I have met
+  civ move <id> X Y        walk a unit to X Y (several turns if needed); the unit becomes Claude's
+  civ claim <id>           take a unit from the built-in AI: it waits for Claude's orders
+  civ release <id|all>     give unit(s) back to the built-in AI
+  civ py "<code>"          DEV: run Python inside the game (sees everything, logged to exec.log);
+                           an expression returns its value, statements return `result`
+  civ ready                Claude is done with this turn: the player may end it
+  civ gate [on|off]        turn gate: the player cannot end the turn until `civ ready`
+  civ say "<text>"         chat line to the player in the game, from Claude's leader
+  civ say --popup "<text>" the same as a popup window
+  civ chat [N]             last N chat messages both ways (default 20); works without the game
+  civ think "<text>"       one line of Claude's reasoning for the video (thoughts.log)
+  civ events [N]           last N things that happened (default 30); works without the game
+  civ raw <cmd> [json]     send any bridge command, print the JSON reply
+
+Everything is limited to what Claude's civilization knows (fog of war).
+The game only answers while its window is focused; commands wait up to 2 min.
+"""
+import json
+import os
+import sys
+import time
+import uuid
+
+BRIDGE = os.path.expanduser(
+    "~/Library/Application Support/CrossOver/Bottles/civ4/drive_c/claude_bridge")
+IN_DIR = os.path.join(BRIDGE, "in")
+OUT_DIR = os.path.join(BRIDGE, "out")
+TIMEOUT = float(os.environ.get("CIV_TIMEOUT", "120"))
+MOVE = 60  # Civ IV counts movement in 1/60ths
+
+
+class BridgeError(Exception):
+    pass
+
+
+def call(cmd, args=None, timeout=TIMEOUT):
+    os.makedirs(IN_DIR, exist_ok=True)
+    os.makedirs(OUT_DIR, exist_ok=True)
+    rid = "%d-%s" % (time.time() * 1000, uuid.uuid4().hex[:6])
+    tmp = os.path.join(IN_DIR, rid + ".tmp")
+    with open(tmp, "w") as f:
+        json.dump({"id": rid, "cmd": cmd, "args": args or {}}, f)
+    os.rename(tmp, os.path.join(IN_DIR, rid + ".json"))
+    reply_path = os.path.join(OUT_DIR, rid + ".json")
+    deadline = time.time() + timeout
+    hinted = False
+    while time.time() < deadline:
+        if not hinted and time.time() > deadline - timeout + 3:
+            # Civ IV only ticks while its window has focus
+            print("(waiting for the game - it only answers while the Civ IV window is focused)", file=sys.stderr)
+            hinted = True
+        if os.path.exists(reply_path):
+            with open(reply_path) as f:
+                reply = json.load(f)
+            os.remove(reply_path)
+            if not reply.get("ok"):
+                raise BridgeError(reply.get("error", "unknown error").strip())
+            return reply["result"]
+        time.sleep(0.05)
+    # the game never picked it up: withdraw the request so it doesn't fire later
+    try:
+        os.remove(os.path.join(IN_DIR, rid + ".json"))
+    except FileNotFoundError:
+        pass
+    raise BridgeError("game did not answer in %.0fs - is Civ IV running with the ClaudeBridge mod?" % timeout)
+
+
+def short(t):
+    if not t:
+        return "-"
+    for p in ("UNIT_", "TECH_", "LEADER_", "ERA_", "RELIGION_", "ATTITUDE_", "BONUS_", "CIVIC_",
+              "BUILDING_", "FEATURE_", "TERRAIN_", "IMPROVEMENT_", "ROUTE_", "SPECIALIST_", "PROJECT_",
+              "PROCESS_", "CULTURELEVEL_", "GOODY_", "PROMOTION_"):
+        if t.startswith(p):
+            return t[len(p):].replace("_", " ").title()
+    return t
+
+
+def year(y):
+    return "%d BC" % -y if y < 0 else "%d AD" % y
+
+
+def fmt_status(s):
+    me = s["me"]
+    players = {p["id"]: p for p in s["players"]}
+    mep, emp = players[me], s["my_empire"]
+    out = ["Turn %d, %s. I am %s of %s (player %d)." % (
+        s["turn"], year(s["year"]), mep["name"], mep["civ"], me)]
+    out.append("Gold %d (%+d/turn). Research: %s (%s turns). Era %s. State religion %s." % (
+        emp["gold"], emp["gold_per_turn"], short(emp["research"]), emp.get("research_turns", "?"),
+        short(mep.get("era")), short(mep.get("state_religion"))))
+    out.append("")
+    out.append("Cities:")
+    for c in emp["cities"]:
+        out.append("  %-12s (%d,%d) pop %d%s | builds %s (%dt) | grows %st | happy %d/%d health %d/%d" % (
+            c["name"], c["x"], c["y"], c["pop"], " capital" if c["capital"] else "",
+            c["building"] or "nothing", c["build_turns"],
+            c["food_turns"] if c["food_turns"] >= 0 else "-",
+            c["happy"], c["unhappy"], c["health"], c["unhealth"]))
+    if not emp["cities"]:
+        out.append("  (none)")
+    out.append("")
+    out.append("Units:")
+    for u in sorted(s["my_units"], key=lambda u: (u["x"], u["y"], u["id"])):
+        flags = []
+        if u["automated"]:
+            flags.append("automated")
+        if u["fortified"]:
+            flags.append("fortified")
+        if u["waiting"]:
+            flags.append("waiting")
+        if u.get("claimed"):
+            flags.append("CLAUDE" + (" -> %d,%d" % tuple(u["target"]) if u.get("target") else ", waiting for orders"))
+        if u["missions_queued"]:
+            flags.append("%d orders queued" % u["missions_queued"])
+        if u["damage"]:
+            flags.append("damaged %d%%" % u["damage"])
+        out.append("  #%-5d %-14s (%d,%d) moves %g/%g lvl %d%s" % (
+            u["id"], short(u["type"]), u["x"], u["y"], u["moves"] / MOVE, u["max_moves"] / MOVE,
+            u["level"], ("  [" + ", ".join(flags) + "]") if flags else ""))
+    out.append("")
+    out.append("Others:")
+    known = False
+    for p in sorted(players.values(), key=lambda p: p["id"]):
+        if p["id"] == me or not p.get("met") or p.get("barbarian"):
+            continue
+        known = True
+        out.append("  %s of %s%s: score %s, era %s, attitude to me %s%s" % (
+            p["name"], p["civ"], " [HUMAN]" if p.get("human") else "", p.get("score"),
+            short(p.get("era")), short(p.get("their_attitude_to_me")),
+            ", AT WAR" if p.get("at_war_with_me") else ""))
+    unmet = sum(1 for p in players.values() if not p.get("met") and not p.get("barbarian"))
+    if not known:
+        out.append("  nobody met yet")
+    out.append("  not met: %d civs" % unmet)
+    return "\n".join(out)
+
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+OUT = os.path.join(HERE, "out")
+EVENTS = os.path.join(BRIDGE, "events.jsonl")
+CHAT = os.path.join(BRIDGE, "chat.jsonl")
+# video logs: every command and every thought, with wall-clock time, for overlays in the edit
+VIDEO_LOG_DIR = os.path.join(HERE, "games", os.environ.get("CIV_GAME", "celts-vs-spain"))
+
+
+FIELD_ORDER = ["id", "name", "type", "civ", "leader", "owner", "human", "x", "y", "pop", "capital",
+               "strength", "moves", "max_moves", "moves_per_turn", "damage", "level", "xp", "promotions"]
+
+
+def fmt_value(v):
+    if v is None:
+        return "-"
+    if isinstance(v, str):
+        return short(v)
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    if isinstance(v, list):
+        if v and isinstance(v[0], dict):
+            return "; ".join(fmt_inline(x) for x in v)
+        return ", ".join(fmt_value(x) for x in v) if v else "-"
+    if isinstance(v, dict):
+        return fmt_inline(v)
+    return str(v)
+
+
+def fmt_inline(d):
+    return " ".join("%s=%s" % (k, fmt_value(v)) for k, v in d.items())
+
+
+def fmt_record(d, skip=()):
+    for k in ("moves", "max_moves"):
+        if isinstance(d.get(k), int):
+            d[k] = "%g" % (d[k] / MOVE)  # game counts movement in 1/60ths
+    rank = {k: i for i, k in enumerate(FIELD_ORDER)}
+    out = []
+    for k, v in sorted(d.items(), key=lambda kv: (rank.get(kv[0], len(rank)), kv[0])):
+        if k in skip:
+            continue
+        out.append("%-16s %s" % (k + ":", fmt_value(v)))
+    return "\n".join(out)
+
+
+def cmd_map(argv):
+    sys.path.insert(0, HERE)
+    import render_map
+    state = call("map")
+    os.makedirs(OUT, exist_ok=True)
+    region = None
+    if len(argv) >= 2:
+        x, y = int(argv[0]), int(argv[1])
+        r = int(argv[2]) if len(argv) > 2 else 6
+        region = (x - r, y - r, x + r, y + r)
+    png = os.path.join(OUT, "map_T%03d.png" % state["turn"])
+    render_map.render(state, png, region)
+    with open(os.path.join(OUT, "state_T%03d.json" % state["turn"]), "w") as f:
+        json.dump(state, f)
+    print(png)
+    print(png.replace(".png", "_zoom.png"))
+    print(render_map.summary_short(state) if hasattr(render_map, "summary_short") else "")
+
+
+def cmd_city(argv):
+    d = call("city", {"name": " ".join(argv)})
+    tiles = d.pop("tiles", None)
+    d.pop("tile_fields", None)
+    print(fmt_record(d))
+    if tiles:
+        worked = ["(%d,%d) %d/%d/%d" % (t[0], t[1], t[3], t[4], t[5]) for t in tiles if t[2]]
+        free = ["(%d,%d) %d/%d/%d" % (t[0], t[1], t[3], t[4], t[5]) for t in tiles if not t[2]]
+        print("%-16s %s" % ("worked tiles:", ", ".join(worked) + "   (food/production/commerce)"))
+        print("%-16s %s" % ("other tiles:", ", ".join(free)))
+
+
+def cmd_player(argv):
+    d = call("player", {"name": " ".join(argv)})
+    print(fmt_record(d, skip=("color",)))
+
+
+def cmd_events(argv):
+    n = int(argv[0]) if argv else 30
+    if not os.path.exists(EVENTS):
+        print("no events yet")
+        return
+    with open(EVENTS) as f:
+        lines = f.readlines()[-n:]
+    for line in lines:
+        e = json.loads(line)
+        head = "T%-4d %-8s %s" % (e.pop("turn"), year(e.pop("year")), e.pop("kind"))
+        e.pop("time", None)
+        print(head + ("  " + fmt_inline(e) if e else ""))
+
+
+def video_log(name, record):
+    os.makedirs(VIDEO_LOG_DIR, exist_ok=True)
+    record = dict(record, wall=time.strftime("%Y-%m-%d %H:%M:%S"))
+    with open(os.path.join(VIDEO_LOG_DIR, name), "a") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def main(argv):
+    if argv and argv[0] not in ("-h", "--help", "think", "events", "chat"):
+        video_log("commands.jsonl", {"cmd": " ".join(argv)[:500]})
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0
+    cmd = argv[0]
+    try:
+        if cmd == "ping":
+            t0 = time.time()
+            r = call("ping")
+            ms = (time.time() - t0) * 1000
+            if not r["game_ready"]:
+                print("bridge alive (%.0f ms), no game in progress" % ms)
+            else:
+                print("bridge v%s alive (%.0f ms). Turn %d, %s. Claude = player %d. Turn active: %s" % (
+                    r.get("bridge_version", 1), ms, r["turn"], year(r["year"]), r["claude_player"],
+                    r["turn_active_players"]))
+        elif cmd == "status":
+            print(fmt_status(call("status")))
+        elif cmd == "map":
+            cmd_map(argv[1:])
+        elif cmd == "tile":
+            print(fmt_record(call("tile", {"x": int(argv[1]), "y": int(argv[2])})))
+        elif cmd == "city":
+            cmd_city(argv[1:])
+        elif cmd == "unit":
+            print(fmt_record(call("unit", {"id": int(argv[1])})))
+        elif cmd == "player":
+            cmd_player(argv[1:])
+        elif cmd == "move":
+            print(fmt_record(call("move", {"id": int(argv[1]), "x": int(argv[2]), "y": int(argv[3])})))
+        elif cmd == "py":
+            print(call("exec", {"code": " ".join(argv[1:]) if len(argv) > 1 else sys.stdin.read()})["value"])
+        elif cmd == "ready":
+            print(fmt_record(call("ready")))
+        elif cmd == "gate":
+            args = {"on": argv[1] == "on"} if len(argv) > 1 else {}
+            print(fmt_record(call("gate", args)))
+        elif cmd == "claim":
+            print(fmt_record(call("claim", {"id": int(argv[1])})))
+        elif cmd == "release":
+            print(fmt_record(call("release", {"id": argv[1] if argv[1] == "all" else int(argv[1])})))
+        elif cmd == "say":
+            popup = len(argv) > 1 and argv[1] == "--popup"
+            call("say", {"text": " ".join(argv[2 if popup else 1:]), "popup": popup})
+            print("shown in game")
+        elif cmd == "chat":
+            n = int(argv[1]) if len(argv) > 1 else 20
+            if os.path.exists(CHAT):
+                with open(CHAT) as f:
+                    for line in f.readlines()[-n:]:
+                        m = json.loads(line)
+                        print("T%-4d %s %-7s %s" % (m["turn"], m["time"], m["from"], m["text"]))
+            else:
+                print("no messages yet")
+        elif cmd == "think":
+            video_log("thoughts.jsonl", {"text": " ".join(argv[1:])})
+            print("noted")
+        elif cmd == "events":
+            cmd_events(argv[1:])
+        elif cmd == "raw":
+            args = json.loads(argv[2]) if len(argv) > 2 else {}
+            print(json.dumps(call(argv[1], args), indent=1, ensure_ascii=False))
+        else:
+            print("unknown command: %s\n\n%s" % (cmd, __doc__.strip()), file=sys.stderr)
+            return 2
+    except BridgeError as e:
+        print("ERROR: %s" % e, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

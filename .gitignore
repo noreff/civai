@@ -1,0 +1,7 @@
+# generated maps, state snapshots
+out/
+# live game memory and video logs (per game, change every turn)
+games/
+__pycache__/
+*.pyc
+.DS_Store
