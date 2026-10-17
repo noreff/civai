@@ -15,6 +15,14 @@
                            PROMOTE_COMBAT1, UPGRADE_..., AUTO_BUILD, AUTO_EXPLORE, ...;
                            MOVE_TO / ROUTE_TO take X Y; the unit stays Claude's (AUTO_ hands
                            it to the game's automation); a finished job wakes Claude (unit_done)
+  civ offer <player> [--give ITEM]... [--get ITEM]...
+                           propose a deal; items: tech:<name>, gold:<n>, open_borders,
+                           defensive_pact, peace, war:<player>. An AI answers at once (game's
+                           refusal rules + value); the human sees it on screen and types
+                           !accept N / !decline N in chat (deal_done / deal_declined events)
+  civ give <player> ITEM...  a gift (no answer needed), e.g. civ give India tech:Alphabet
+  civ offers               open offers waiting for an answer
+  civ war <player>         declare war (only Claude declares wars for its civ)
   civ area X Y [R]         text map of the region around X Y (radius R, default 6) with cities,
                            resources, foreign units, borders, and the best city sites there
   civ research [tech] [--queue]
@@ -332,6 +340,22 @@ def main(argv):
             if "--queue" in argv:
                 args["queue"] = True
             print(fmt_record(call("do", args)))
+        elif cmd in ("offer", "give"):
+            give, get, i = [], [], 2
+            if cmd == "give":
+                give = argv[2:]
+            else:
+                while i < len(argv):
+                    if argv[i] in ("--give", "--get") and i + 1 < len(argv):
+                        (give if argv[i] == "--give" else get).append(argv[i + 1])
+                        i += 2
+                    else:
+                        i += 1
+            print(fmt_record(call("offer", {"player": argv[1], "give": give, "get": get})))
+        elif cmd == "offers":
+            print(fmt_record(call("offers")))
+        elif cmd == "war":
+            print(fmt_record(call("war", {"player": argv[1]})))
         elif cmd == "area":
             xy = " ".join(argv[1:]).replace(",", " ").split()
             args = {"x": int(xy[0]), "y": int(xy[1])}

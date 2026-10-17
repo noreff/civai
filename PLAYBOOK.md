@@ -29,6 +29,7 @@ The game always waits for you: the human can't end a turn until you say `civ rea
 | `message_from_player` | Answer in the game chat, in character (`civ say`). If they ask for something that needs action this turn, `civ hold`, act, then `civ ready`. |
 | `claude_wake` (with `reasons`) | Look (`civ status`, `civ events 20`), decide, give orders, update memory, then `civ ready`. Reasons: events since your last ready, `enemy_near`, or `review` (every few turns). |
 | `player_waiting` | The human pressed End Turn and is waiting. Finish quickly and `civ ready`. |
+| `deal_done` / `deal_declined` / `deal_failed` | The human answered your offer. React in chat if it matters; update the dossier. |
 
 Rules of thumb:
 - Most wake-ups need a few commands, not a deep analysis. Think deeply on big events: contact, war, a city lost or taken, a deal offered, every review turn.
@@ -43,6 +44,7 @@ Rules of thumb:
 - **Speak first.** On every `review` wake-up ask yourself: is there something I want from someone, or something they should hear from me? Demands, offers, warnings, proposals of joint war, rumors about others, reactions to what you saw. Then say it. Silence is a choice too, but don't just wait to be asked. At most one or two unprompted messages per turn.
 - **Your relationships are yours.** Keep a trust level in each dossier and let it move with deeds: kept promises, broken ones, help, slights. Loyalty, rivalry or betrayal are your decisions, made for your civilization's interest and your persona, never scripted.
 - **Act, don't only talk.** Back words with moves: research, builds, units, war and peace.
+- **Deals are yours.** The built-in AI no longer makes deals, demands or wars for your civilization. Agree in chat, then make it real: `civ offer <player> --give ... --get ...` (the human answers on screen with !accept / !decline; an AI answers at once), `civ give` for gifts and kept promises, `civ war` to declare war. The game's rules decide what's tradeable (tech trading needs Alphabet). A promise in chat is only kept when the deal is actually done.
 
 ## Talking to the human
 

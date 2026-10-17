@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 21
+BRIDGE_VERSION = 23
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -674,6 +674,9 @@ def recordEvent(tag, a):
 		if text.strip().lower() == u"!go":
 			setReady("player")
 			CyInterface().addImmediateMessage(u"Turn unlocked by you (!go).", "")
+		elif text.strip().lower().startswith(u"!accept") or text.strip().lower().startswith(u"!decline"):
+			human = humanPlayers()
+			answerOffer(text.strip(), human and human[0] or 0)
 		else:
 			writeEvent("message_from_player", {"text": text, "via": "chat"})
 	elif tag == "BeginPlayerTurn" and a[1] == iMe:
@@ -792,7 +795,18 @@ def aiUnitUpdate(gu, argsList):
 	if not claims.has_key(u.getID()):
 		return gu._claudeOrigUnitUpdate(argsList)
 	g = u.getGroup()
-	t = claims[u.getID()].get("target")
+	cl = claims[u.getID()]
+	if cl.get("mission") and not cl.get("started"):
+		# an order given outside this civ's turn gets dropped when the turn starts: run it now
+		m, d1, d2 = cl["mission"]
+		cl["started"] = True
+		saveClaims(claims)
+		pl = u.plot()
+		if d1 >= 0 and d2 >= 0 and cl.get("targeted"):
+			pl = CyMap().plot(d1, d2)
+		g.pushMission(MissionTypes(m), d1, d2, 0, False, True, MissionAITypes.NO_MISSIONAI, pl, u)
+		return 1
+	t = cl.get("target")
 	if t and (u.getX(), u.getY()) != (t[0], t[1]):
 		# the pathfinder only knows revealed tiles: aim at the target itself, or else at the
 		# revealed tiles closest to it (exploring towards it), nearest first
@@ -807,8 +821,9 @@ def aiUnitUpdate(gu, argsList):
 		saveClaims(claims)
 		writeEvent("unit_arrived", {"id": u.getID(), "unit": gc.getUnitInfo(u.getUnitType()).getType(),
 			"x": u.getX(), "y": u.getY()})
-	elif claims[u.getID()].get("busy"):
-		claims[u.getID()]["busy"] = False
+	elif cl.get("busy"):
+		cl["busy"] = False
+		cl["mission"] = None
 		saveClaims(claims)
 		writeEvent("unit_done", {"id": u.getID(), "unit": gc.getUnitInfo(u.getUnitType()).getType(),
 			"x": u.getX(), "y": u.getY()})
@@ -961,8 +976,14 @@ def installPatches():
 	if not hasattr(gu, "_claudeOrigChooseProduction"):
 		gu._claudeOrigChooseProduction = gu.AI_chooseProduction
 	gu.AI_chooseProduction = chooseProductionTrampoline
+	if not hasattr(gu, "_claudeOrigDoDiplo"):
+		gu._claudeOrigDoDiplo = gu.AI_doDiplo
+	gu.AI_doDiplo = doDiploTrampoline
+	if not hasattr(gu, "_claudeOrigDoWar"):
+		gu._claudeOrigDoWar = gu.AI_doWar
+	gu.AI_doWar = doWarTrampoline
 	g_patched[0] = True
-	log("hooks installed: chat, unit claims, city claims, turn gate")
+	log("hooks installed: chat, unit claims, city claims, diplomacy, war, turn gate")
 
 def cmdSay(args):
 	# a chat line in the game's chat log (like a human opponent), or a popup with popup=true
@@ -1187,13 +1208,24 @@ def cmdDo(args):
 		if name == "MOVE_TO":
 			return cmdMove(args)
 		x, y = int(args["x"]), int(args["y"])
-		setClaim(u.getID(), None)
-		g.pushMission(MissionTypes(m), x, y, 0, bool(args.get("queue")), True, MissionAITypes.NO_MISSIONAI, CyMap().plot(x, y), u)
-	elif m >= 0:
+		ours = gc.getPlayer(u.getOwner()).isTurnActive()
 		c2 = loadClaims()
-		c2[u.getID()] = {"target": None, "busy": True}
+		c2[u.getID()] = {"target": None, "busy": True, "mission": [m, x, y], "targeted": True, "started": ours}
 		saveClaims(c2)
-		g.pushMission(MissionTypes(m), a.getMissionData(), -1, 0, bool(args.get("queue")), True, MissionAITypes.NO_MISSIONAI, u.plot(), u)
+		if ours:
+			g.pushMission(MissionTypes(m), x, y, 0, bool(args.get("queue")), True, MissionAITypes.NO_MISSIONAI, CyMap().plot(x, y), u)
+	elif m >= 0:
+		# outside our own turn the game drops queued orders at turn start, so the claim keeps
+		# the order and the unit hook issues it when our turn comes (started=False)
+		ours = gc.getPlayer(u.getOwner()).isTurnActive()
+		c2 = loadClaims()
+		c2[u.getID()] = {"target": None, "busy": True, "mission": [m, a.getMissionData(), -1], "started": ours}
+		saveClaims(c2)
+		if ours:
+			g.pushMission(MissionTypes(m), a.getMissionData(), -1, 0, bool(args.get("queue")), True, MissionAITypes.NO_MISSIONAI, u.plot(), u)
+		else:
+			g.clearMissionQueue()
+			return {"id": u.getID(), "will_do": name, "when": "at the start of our next turn (orders given during another player's turn run then)"}
 	elif c >= 0:
 		u.doCommand(CommandTypes(c), a.getCommandData(), -1)
 	else:
@@ -1207,6 +1239,256 @@ def cmdDo(args):
 		return {"id": args["id"], "done": name, "unit": "gone (used up, e.g. founded a city)"}
 	return {"id": u.getID(), "done": name, "at": (u.getX(), u.getY()), "moves_left": u.movesLeft() / gc.getMOVE_DENOMINATOR(),
 		"orders_queued": g.getLengthMissionQueue()}
+
+
+# ------------------------------------------------------------------------ deals
+#
+# The game's own deal machinery isn't reachable from Python, but its results are
+# (setHasTech, signOpenBorders, makePeace, declareWar...). So deals are done here,
+# each item checked with the game's own rules (canTradeItem) first.
+#   - with the human: the offer shows on screen; they answer "!accept N" / "!decline N" in chat
+#   - with an AI: it decides at once, by the game's own refusal rules (getTradeDenial),
+#     its attitude, and a simple value check
+# The built-in AI's own diplomacy and war planning are switched off for Claude's civ
+# (AI_doDiplo / AI_doWar hooks): every deal, demand and war of that civ is Claude's.
+# Items: tech:<name>, gold:<n>, open_borders, defensive_pact, peace, war:<player>
+
+OFFERS_FILE = OUT_DIR + "\\offers.json"
+
+def loadOffers():
+	if not os.path.exists(OFFERS_FILE):
+		return {"next": 1, "open": {}}
+	f = open(OFFERS_FILE, "rb")
+	try:
+		return fromJson(f.read())
+	finally:
+		f.close()
+
+def saveOffers(o):
+	writeAtomic(OFFERS_FILE, toJson(o))
+
+def findPlayer(want):
+	w = unicode(want).lower()
+	for i in range(gc.getMAX_CIV_PLAYERS()):
+		p = gc.getPlayer(i)
+		if p.isAlive() and (str(i) == w or p.getName().lower().startswith(w)
+				or p.getCivilizationShortDescription(0).lower().startswith(w)):
+			return i
+	raise Exception("no player called %s" % want)
+
+def parseItem(text):
+	k = text.strip().lower()
+	if ":" in k:
+		kind, arg = k.split(":", 1)
+	else:
+		kind, arg = k, ""
+	kind = kind.strip().replace(" ", "_")
+	if kind == "tech":
+		i = findInfo(arg, gc.getNumTechInfos(), gc.getTechInfo, "tech_")
+		if i < 0:
+			raise Exception("no tech called %s" % arg)
+		return ("tech", i)
+	if kind == "gold":
+		return ("gold", int(arg))
+	if kind in ("open_borders", "defensive_pact", "peace"):
+		return (kind, -1)
+	if kind == "war":
+		return ("war", findPlayer(arg))
+	raise Exception("unknown deal item %s (tech:<name>, gold:<n>, open_borders, defensive_pact, peace, war:<player>)" % text)
+
+def itemText(it):
+	kind, d = it
+	if kind == "tech":
+		return gc.getTechInfo(d).getDescription()
+	if kind == "gold":
+		return "%d gold" % d
+	if kind == "war":
+		return "war on " + pname(d)
+	return kind.replace("_", " ")
+
+TRADE_TYPES = {"tech": "TRADE_TECHNOLOGIES", "gold": "TRADE_GOLD", "open_borders": "TRADE_OPEN_BORDERS",
+	"defensive_pact": "TRADE_DEFENSIVE_PACT", "peace": "TRADE_PEACE_TREATY", "war": "TRADE_WAR"}
+
+def tradeData(it):
+	kind, d = it
+	t = TradeData()
+	t.ItemType = getattr(TradeableItems, TRADE_TYPES[kind])
+	if kind == "war":
+		t.iData = gc.getPlayer(d).getTeam()
+	elif kind in ("tech", "gold"):
+		t.iData = d
+	else:
+		t.iData = 0
+	return t
+
+def checkItem(giver, taker, it):
+	# raise unless `giver` may give `it` to `taker` under the game's rules
+	g, t = gc.getPlayer(giver), gc.getPlayer(taker)
+	kind, d = it
+	if kind == "peace":
+		if not gc.getTeam(g.getTeam()).isAtWar(t.getTeam()):
+			raise Exception("%s and %s are not at war" % (pname(giver), pname(taker)))
+		return
+	if kind == "gold" and g.getGold() < d:
+		raise Exception("%s has only %d gold" % (pname(giver), g.getGold()))
+	if not g.canTradeItem(taker, tradeData(it), False):
+		raise Exception("%s can't give %s to %s under the game's rules (e.g. tech trading needs Alphabet; "
+			"open borders need contact and no war...)" % (pname(giver), itemText(it), pname(taker)))
+
+def doItem(giver, taker, it):
+	g, t = gc.getPlayer(giver), gc.getPlayer(taker)
+	kind, d = it
+	if kind == "tech":
+		gc.getTeam(t.getTeam()).setHasTech(d, True, taker, False, True)
+	elif kind == "gold":
+		g.changeGold(-d)
+		t.changeGold(d)
+	elif kind == "open_borders":
+		gc.getTeam(g.getTeam()).signOpenBorders(t.getTeam())
+	elif kind == "defensive_pact":
+		gc.getTeam(g.getTeam()).signDefensivePact(t.getTeam())
+	elif kind == "peace":
+		gc.getTeam(g.getTeam()).makePeace(t.getTeam())
+	elif kind == "war":
+		gc.getTeam(g.getTeam()).declareWar(gc.getPlayer(d).getTeam(), True, WarPlanTypes.WARPLAN_DOGPILE)
+
+def itemValue(owner, it):
+	kind, d = it
+	if kind == "tech":
+		return gc.getTeam(gc.getPlayer(owner).getTeam()).getResearchCost(d)
+	if kind == "gold":
+		return d
+	return 0
+
+def aiAccepts(ai, me, give, get):
+	# give = what Claude gives the AI, get = what the AI gives Claude
+	p = gc.getPlayer(ai)
+	for it in get:
+		den = p.getTradeDenial(me, tradeData(it))
+		if den != DenialTypes.NO_DENIAL and it[0] != "peace":
+			return False, "%s refuses to give %s (%s)" % (pname(ai), itemText(it), gc.getDenialInfo(den).getDescription())
+	att = p.AI_getAttitude(me)
+	if get and att <= AttitudeTypes.ATTITUDE_ANNOYED:
+		return False, "%s is %s toward us and won't deal" % (pname(ai), gc.getAttitudeInfo(att).getDescription())
+	vin = sum([itemValue(ai, it) for it in give])
+	vout = sum([itemValue(ai, it) for it in get])
+	if vout > vin * 1.1 + 10:
+		return False, "%s finds it unfair: gives about %d, gets about %d" % (pname(ai), vout, vin)
+	return True, "accepted"
+
+def executeDeal(a, b, giveA, giveB):
+	for it in giveA:
+		checkItem(a, b, it)
+	for it in giveB:
+		checkItem(b, a, it)
+	for it in giveA:
+		doItem(a, b, it)
+	for it in giveB:
+		doItem(b, a, it)
+
+def cmdOffer(args):
+	iMe, iTeam = myIds()
+	other = findPlayer(args["player"])
+	if other == iMe:
+		raise Exception("that's us")
+	if not gc.getTeam(iTeam).isHasMet(gc.getPlayer(other).getTeam()):
+		raise Exception("we haven't met %s" % args["player"])
+	give = [parseItem(x) for x in args.get("give") or []]
+	get = [parseItem(x) for x in args.get("get") or []]
+	if not give and not get:
+		raise Exception("an offer needs something to give or to get")
+	for it in give:
+		checkItem(iMe, other, it)
+	for it in get:
+		checkItem(other, iMe, it)
+	if not get:
+		# a gift needs no answer
+		executeDeal(iMe, other, give, [])
+		writeEvent("deal_done", {"with": pname(other), "gave": [itemText(x) for x in give], "got": []})
+		if gc.getPlayer(other).isHuman():
+			CyInterface().addMessage(other, True, gc.getEVENT_MESSAGE_TIME() * 3,
+				u"<font=4><color=255,200,60,255>%s gives you: %s</color></font>" % (gc.getPlayer(iMe).getName(),
+				", ".join([itemText(x) for x in give])), "", InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
+		return {"done": True, "gave": [itemText(x) for x in give]}
+	if not gc.getPlayer(other).isHuman():
+		ok, why = aiAccepts(other, iMe, give, get)
+		if not ok:
+			writeEvent("deal_refused", {"with": pname(other), "why": why})
+			return {"done": False, "why": why}
+		executeDeal(iMe, other, give, get)
+		writeEvent("deal_done", {"with": pname(other), "gave": [itemText(x) for x in give], "got": [itemText(x) for x in get]})
+		return {"done": True, "gave": [itemText(x) for x in give], "got": [itemText(x) for x in get]}
+	o = loadOffers()
+	n = o["next"]
+	o["next"] = n + 1
+	o["open"][str(n)] = {"from": iMe, "to": other, "give": [list(x) for x in give], "get": [list(x) for x in get],
+		"turn": gc.getGame().getGameTurn()}
+	saveOffers(o)
+	line = u"<font=4><color=255,200,60,255>%s offers a deal #%d - you get: %s; he gets: %s. Type !accept %d or !decline %d in chat.</color></font>" % (
+		gc.getPlayer(iMe).getName(), n, ", ".join([itemText(x) for x in give]) or "nothing",
+		", ".join([itemText(x) for x in get]), n, n)
+	CyInterface().addMessage(other, True, gc.getEVENT_MESSAGE_TIME() * 4, line, "",
+		InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
+	writeEvent("deal_offered", {"id": n, "to": pname(other), "give": [itemText(x) for x in give], "get": [itemText(x) for x in get]})
+	return {"offer": n, "waiting_for": pname(other)}
+
+def answerOffer(text, human):
+	# "!accept N" / "!decline N" typed by the human in chat
+	parts = text.split()
+	o = loadOffers()
+	n = len(parts) > 1 and parts[1] or ""
+	if not o["open"].has_key(n):
+		CyInterface().addImmediateMessage(u"No open deal #%s." % n, "")
+		return
+	d = o["open"][n]
+	del o["open"][n]
+	saveOffers(o)
+	give = [tuple(x) for x in d["give"]]
+	get = [tuple(x) for x in d["get"]]
+	if parts[0].lower() == "!decline":
+		writeEvent("deal_declined", {"id": int(n), "by": pname(human)})
+		return
+	try:
+		executeDeal(d["from"], d["to"], give, get)
+	except:
+		why = str(sys.exc_info()[1])
+		writeEvent("deal_failed", {"id": int(n), "why": why})
+		CyInterface().addImmediateMessage(u"Deal #%s can't be done: %s" % (n, why), "")
+		return
+	writeEvent("deal_done", {"id": int(n), "with": pname(human), "gave": [itemText(x) for x in give], "got": [itemText(x) for x in get]})
+	CyInterface().addImmediateMessage(u"Deal #%s done." % n, "")
+
+def cmdOffers(args):
+	o = loadOffers()
+	return {"open": ["#%s to %s: give %s; get %s" % (k, pname(v["to"]), ", ".join([itemText(tuple(x)) for x in v["give"]]) or "nothing",
+		", ".join([itemText(tuple(x)) for x in v["get"]])) for k, v in o["open"].items()]}
+
+def cmdWar(args):
+	# Claude's own declaration of war (the built-in AI no longer declares wars for this civ)
+	iMe, iTeam = myIds()
+	other = gc.getPlayer(findPlayer(args["player"])).getTeam()
+	if not gc.getTeam(iTeam).canDeclareWar(other):
+		raise Exception("we can't declare war on %s now (peace treaty still running, or not met?)" % args["player"])
+	gc.getTeam(iTeam).declareWar(other, True, WarPlanTypes.WARPLAN_TOTAL)
+	return {"war_declared_on": gc.getTeam(other).getName()}
+
+def aiDoDiplo(gu, argsList):
+	if argsList[0] == getClaudePlayer():
+		return True
+	return gu._claudeOrigDoDiplo(argsList)
+
+def aiDoWar(gu, argsList):
+	if argsList[0] == gc.getPlayer(getClaudePlayer()).getTeam():
+		return True
+	return gu._claudeOrigDoWar(argsList)
+
+def doDiploTrampoline(argsList):
+	import CvGameInterfaceFile
+	return sys.modules["ClaudeBridge"].aiDoDiplo(CvGameInterfaceFile.GameUtils, argsList)
+
+def doWarTrampoline(argsList):
+	import CvGameInterfaceFile
+	return sys.modules["ClaudeBridge"].aiDoWar(CvGameInterfaceFile.GameUtils, argsList)
 
 # ------------------------------------------------------- orders: research, builds
 #
@@ -1379,7 +1661,7 @@ def setReady(byWhom):
 
 ATTENTION_KINDS = ("first_contact", "war_declared", "peace_made", "city_founded", "city_changed_hands",
 	"city_razed", "combat", "tech_learned", "building_built", "project_built", "religion_founded",
-	"great_person", "golden_age", "unit_arrived", "unit_done")
+	"great_person", "golden_age", "unit_arrived", "unit_done", "deal_done", "deal_declined", "deal_failed")
 
 def noteAttention(kind):
 	g = readGate()
@@ -1547,6 +1829,9 @@ COMMANDS = {
 	"research": cmdResearch,
 	"area": cmdArea,
 	"actions": cmdActions,
+	"offer": cmdOffer,
+	"offers": cmdOffers,
+	"war": cmdWar,
 	"do": cmdDo,
 	"build": cmdBuild,
 	"ping": cmdPing,
