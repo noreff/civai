@@ -9,6 +9,15 @@
   civ unit <id>            one of my units
   civ player <name|civ|id> a player I have met
   civ move <id> X Y        walk a unit to X Y (several turns if needed); the unit becomes Claude's
+  civ research [tech] [--queue]
+                           no tech: what we research, the queue, what we can research (turns);
+                           tech: research it now (missing prerequisites are queued first);
+                           --queue: add it after the current queue
+  civ build <city> <item> [--queue|--first|--check]
+                           what a city builds (unit, building, project, or Wealth/Research);
+                           replaces the current item unless --queue (at the end) / --first;
+                           --check only tells whether it is possible. The built-in AI then
+                           leaves that city's queue alone until it runs empty
   civ claim <id>           take a unit from the built-in AI: it waits for Claude's orders
   civ release <id|all>     give unit(s) back to the built-in AI
   civ py "<code>"          DEV: run Python inside the game (sees everything, logged to exec.log);
@@ -26,6 +35,7 @@
   civ raw <cmd> [json]     send any bridge command, print the JSON reply
 
 Everything is limited to what Claude's civilization knows (fog of war).
+CIV_PLAYER=N makes the commands act for AI civ N (several agents in one game); humans are refused.
 The game answers only while a game is loaded; commands wait up to 2 min.
 """
 import json
@@ -52,7 +62,10 @@ def call(cmd, args=None, timeout=TIMEOUT):
     rid = "%d-%s" % (time.time() * 1000, uuid.uuid4().hex[:6])
     tmp = os.path.join(IN_DIR, rid + ".tmp")
     with open(tmp, "w") as f:
-        json.dump({"id": rid, "cmd": cmd, "args": args or {}}, f)
+        req = {"id": rid, "cmd": cmd, "args": args or {}}
+        if os.environ.get("CIV_PLAYER"):
+            req["player"] = int(os.environ["CIV_PLAYER"])   # act as this AI civ (multi-agent games)
+        json.dump(req, f)
     os.rename(tmp, os.path.join(IN_DIR, rid + ".json"))
     reply_path = os.path.join(OUT_DIR, rid + ".json")
     deadline = time.time() + timeout
@@ -297,6 +310,17 @@ def main(argv):
             print(call("exec", {"code": " ".join(argv[1:]) if len(argv) > 1 else sys.stdin.read()})["value"])
         elif cmd == "ready":
             print(fmt_record(call("ready")))
+        elif cmd == "research":
+            words = [a for a in argv[1:] if not a.startswith("--")]
+            args = {"tech": " ".join(words), "queue": "--queue" in argv} if words else {}
+            print(fmt_record(call("research", args)))
+        elif cmd == "build":
+            words = [a for a in argv[1:] if not a.startswith("--")]
+            args = {"name": words[0], "item": " ".join(words[1:])}
+            for flag in ("queue", "first", "check"):
+                if "--" + flag in argv:
+                    args[flag] = True
+            print(fmt_record(call("build", args)))
         elif cmd == "hold":
             print(fmt_record(call("hold")))
         elif cmd == "gate":

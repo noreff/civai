@@ -15,7 +15,7 @@ The `civ` tool is `~/civai/civ`. `civ help` lists every command.
 
 - You know only what your civilization knows. Every `civ` command except `civ py` is already limited to that (fog of war).
 - `civ py` runs code inside the game and sees everything. Use it only to:
-  - give orders to your own civ that have no proper command yet (research, city builds, unit missions);
+  - give orders to your own civ that have no proper command yet (unit actions other than `civ move`, civics, diplomacy). Research and city builds have real commands now: `civ research`, `civ build`;
   - read the game's rules (tech tree, costs, unit stats).
   Never use it to look at other players' units, cities, gold, techs or plans beyond what `civ player` shows.
 - Don't take game rules from memory: check them in the game (`civ py` on `gc.getTechInfo(...)` etc.). Example: in BtS, Alphabet needs Writing; tech trading needs Alphabet.

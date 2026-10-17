@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 16
+BRIDGE_VERSION = 17
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -95,8 +95,13 @@ def infoType(getter, i):
 
 # ------------------------------------------------------------ who is Claude
 
+g_acting = [None]   # player a request acts for ("player" in the request), else the default
+
 def getClaudePlayer():
-	# config.txt may contain "player = N"; otherwise the first living AI civ
+	# the request's own player if it names one; else config.txt "player = N";
+	# otherwise the first living AI civ
+	if g_acting[0] is not None:
+		return g_acting[0]
 	try:
 		if os.path.exists(CONFIG_FILE):
 			f = open(CONFIG_FILE, "r")
@@ -941,8 +946,11 @@ def installPatches():
 	if not hasattr(gu, "_claudeOrigCannotDoControl"):
 		gu._claudeOrigCannotDoControl = gu.cannotDoControl
 	gu.cannotDoControl = cannotDoControlTrampoline
+	if not hasattr(gu, "_claudeOrigChooseProduction"):
+		gu._claudeOrigChooseProduction = gu.AI_chooseProduction
+	gu.AI_chooseProduction = chooseProductionTrampoline
 	g_patched[0] = True
-	log("hooks installed: chat, unit claims, turn gate")
+	log("hooks installed: chat, unit claims, city claims, turn gate")
 
 def cmdSay(args):
 	# a chat line in the game's chat log (like a human opponent), or a popup with popup=true
@@ -964,6 +972,129 @@ def cmdSay(args):
 					InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
 	writeChat("claude", text)
 	return {"shown": True}
+
+
+# ------------------------------------------------------- orders: research, builds
+#
+# The player's own decisions, checked by the game's rules (canResearch, canTrain...)
+# so an impossible order fails with a reason instead of silently doing nothing.
+# Cities given an order are "claimed": the built-in AI won't change what they build
+# while their queue has something in it (the AI_chooseProduction hook).
+
+CITY_CLAIMS_FILE = OUT_DIR + "\\city_claims.json"
+
+def findInfo(want, count, getter, prefix):
+	# by type ("TECH_ARCHERY") or description ("Archery"), case-insensitive
+	w = want.strip().lower().replace(" ", "_")
+	for i in range(count):
+		info = getter(i)
+		t = info.getType().lower()
+		if t == w or t == prefix + w or info.getDescription().lower().replace(" ", "_") == w:
+			return i
+	return -1
+
+def techName(i):
+	if i < 0:
+		return None
+	return gc.getTechInfo(i).getDescription()
+
+def researchState(p):
+	t = gc.getTeam(p.getTeam())
+	cur = p.getCurrentResearch()
+	queue = [techName(i) for i in range(gc.getNumTechInfos()) if p.isResearchingTech(i)]
+	queue.sort(lambda a, b: cmp(p.getQueuePosition(findInfo(a, gc.getNumTechInfos(), gc.getTechInfo, "tech_")),
+		p.getQueuePosition(findInfo(b, gc.getNumTechInfos(), gc.getTechInfo, "tech_"))))
+	d = {"researching": techName(cur), "queue": queue, "beakers_per_turn": p.calculateResearchRate(-1)}
+	if cur >= 0:
+		d["progress"] = "%d/%d" % (t.getResearchProgress(cur), t.getResearchCost(cur))
+		d["turns"] = p.getResearchTurnsLeft(cur, True)
+	d["can_research"] = ["%s (%dt)" % (techName(i), p.getResearchTurnsLeft(i, True))
+		for i in range(gc.getNumTechInfos()) if p.canResearch(i, False)]
+	return d
+
+def cmdResearch(args):
+	# no tech: show research; tech: research it now (the game queues missing prerequisites);
+	# queue=true: add it after what is already queued
+	p = gc.getPlayer(getClaudePlayer())
+	if args.get("tech"):
+		i = findInfo(args["tech"], gc.getNumTechInfos(), gc.getTechInfo, "tech_")
+		if i < 0:
+			raise Exception("no tech called %s" % args["tech"])
+		if gc.getTeam(p.getTeam()).isHasTech(i):
+			raise Exception("we already know %s" % techName(i))
+		p.pushResearch(i, not args.get("queue"))
+		if not p.isResearchingTech(i):
+			raise Exception("can't research %s (missing prerequisites we can't research yet?)" % techName(i))
+	return researchState(p)
+
+def loadCityClaims():
+	if not os.path.exists(CITY_CLAIMS_FILE):
+		return []
+	f = open(CITY_CLAIMS_FILE, "rb")
+	try:
+		return fromJson(f.read()) or []
+	finally:
+		f.close()
+
+def claimCity(c):
+	ids = loadCityClaims()
+	key = "%d:%d" % (c.getOwner(), c.getID())
+	if key not in ids:
+		ids.append(key)
+		writeAtomic(CITY_CLAIMS_FILE, toJson(ids))
+
+def findItem(want):
+	# a unit, building, project or process for a city's queue
+	for (order, count, getter, prefix) in (
+			(OrderTypes.ORDER_TRAIN, gc.getNumUnitInfos(), gc.getUnitInfo, "unit_"),
+			(OrderTypes.ORDER_CONSTRUCT, gc.getNumBuildingInfos(), gc.getBuildingInfo, "building_"),
+			(OrderTypes.ORDER_CREATE, gc.getNumProjectInfos(), gc.getProjectInfo, "project_"),
+			(OrderTypes.ORDER_MAINTAIN, gc.getNumProcessInfos(), gc.getProcessInfo, "process_")):
+		i = findInfo(want, count, getter, prefix)
+		if i >= 0:
+			return order, i, getter(i).getDescription()
+	raise Exception("nothing called %s to build" % want)
+
+def cmdBuild(args):
+	# what a city of ours builds: replace the current item (default), queue=true to add at the end,
+	# first=true to put it in front; check=true only tells whether it is possible
+	iMe, iTeam = myIds()
+	c = findCity(args)
+	if c.getOwner() != iMe:
+		raise Exception("%s is not our city" % c.getName())
+	order, i, name = findItem(args["item"])
+	if order == OrderTypes.ORDER_TRAIN:
+		possible = c.canTrain(i, False, False)
+	elif order == OrderTypes.ORDER_CONSTRUCT:
+		possible = c.canConstruct(i, False, False, False)
+	elif order == OrderTypes.ORDER_CREATE:
+		possible = c.canCreate(i, False, False)
+	else:
+		possible = c.canMaintain(i, False)
+	if not possible:
+		raise Exception("%s can't build %s now" % (c.getName(), name))
+	if args.get("check"):
+		return {"city": c.getName(), "item": name, "possible": True}
+	if args.get("queue"):
+		c.pushOrder(order, i, -1, False, False, True, False)
+	elif args.get("first"):
+		c.pushOrder(order, i, -1, False, False, False, True)
+	else:
+		c.clearOrderQueue()
+		c.pushOrder(order, i, -1, False, True, False, True)
+	claimCity(c)
+	return {"city": c.getName(), "queue": [orderName(c.getOrderFromQueue(k)) for k in range(c.getOrderQueueLength())],
+		"turns": c.getProductionTurnsLeft()}
+
+def aiChooseProduction(gu, argsList):
+	c = argsList[0]
+	if c.getOrderQueueLength() > 0 and ("%d:%d" % (c.getOwner(), c.getID())) in loadCityClaims():
+		return True   # keep our queue; the built-in AI chooses only when it runs empty
+	return gu._claudeOrigChooseProduction(argsList)
+
+def chooseProductionTrampoline(argsList):
+	import CvGameInterfaceFile
+	return sys.modules["ClaudeBridge"].aiChooseProduction(CvGameInterfaceFile.GameUtils, argsList)
 
 # ---------------------------------------------------------------- turn gate
 #
@@ -1179,6 +1310,8 @@ COMMANDS = {
 	"say": cmdSay,
 	"exec": cmdExec,
 	"move": cmdMove,
+	"research": cmdResearch,
+	"build": cmdBuild,
 	"ping": cmdPing,
 	"status": cmdStatus,
 	"map": cmdMap,
@@ -1204,7 +1337,14 @@ def handleRequest(name):
 		cmd = req.get("cmd")
 		if not COMMANDS.has_key(cmd):
 			raise Exception("unknown command: %s" % cmd)
-		reply = {"id": rid, "ok": True, "result": COMMANDS[cmd](req.get("args") or {})}
+		if req.get("player") is not None:
+			if gc.getPlayer(int(req["player"])).isHuman():
+				raise Exception("player %s is a human: agents can only act for AI-controlled civs" % req["player"])
+			g_acting[0] = int(req["player"])
+		try:
+			reply = {"id": rid, "ok": True, "result": COMMANDS[cmd](req.get("args") or {})}
+		finally:
+			g_acting[0] = None
 	except:
 		reply = {"id": rid, "ok": False,
 			"error": "".join(traceback.format_exception(*sys.exc_info()))}
