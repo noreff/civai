@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 29
+BRIDGE_VERSION = 30
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1381,7 +1381,8 @@ g_snapTick = [0]
 def takeSnapshot():
 	iMe, iTeam = myIds()
 	me, team = gc.getPlayer(iMe), gc.getTeam(iTeam)
-	d = {"techs": [t for t in range(gc.getNumTechInfos()) if team.isHasTech(t)], "gold": me.getGold(), "rel": {}, "res": {}, "theirs": {}}
+	d = {"techs": [t for t in range(gc.getNumTechInfos()) if team.isHasTech(t)], "gold": me.getGold(), "rel": {}, "res": {}, "theirs": {},
+		"researching": [t for t in range(gc.getNumTechInfos()) if me.isResearchingTech(t)]}
 	for i in range(gc.getMAX_CIV_PLAYERS()):
 		p = gc.getPlayer(i)
 		if i == iMe or not p.isAlive() or not team.isHasMet(p.getTeam()):
@@ -1411,7 +1412,8 @@ def checkNativeDeal():
 	g_snap[0] = new
 	if old is None:
 		return
-	got = [gc.getTechInfo(t).getDescription() for t in new["techs"] if t not in old["techs"]]
+	# a tech we were researching just finished: research, not a deal
+	got = [gc.getTechInfo(t).getDescription() for t in new["techs"] if t not in old["techs"] and t not in old.get("researching", [])]
 	lost = [gc.getTechInfo(t).getDescription() for t in old["techs"] if t not in new["techs"]]
 	changes = []
 	if got:
