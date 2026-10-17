@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 26
+BRIDGE_VERSION = 27
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1780,6 +1780,37 @@ def cmdBuild(args):
 	return {"city": c.getName(), "queue": [orderName(c.getOrderFromQueue(k)) for k in range(c.getOrderQueueLength())],
 		"turns": c.getProductionTurnsLeft()}
 
+
+def cmdHurry(args):
+	# the game's Hurry button: whip (population) or buy (gold), whatever our civics allow.
+	# Without "how", it only shows the options and their price.
+	iMe, iTeam = myIds()
+	c = findCity(args)
+	if c.getOwner() != iMe:
+		raise Exception("%s is not our city" % c.getName())
+	opts = []
+	for h in range(gc.getNumHurryInfos()):
+		info = gc.getHurryInfo(h)
+		if c.canHurry(HurryTypes(h), False):
+			opts.append((info.getType()[len("HURRY_"):].lower(), h, c.hurryPopulation(h), c.hurryGold(h),
+				c.hurryAngerLength(h)))
+	if c.getOrderQueueLength() == 0:
+		raise Exception("%s is building nothing" % c.getName())
+	building = orderName(c.getOrderFromQueue(0))
+	if not args.get("how"):
+		return {"city": c.getName(), "building": building, "turns_left": c.getProductionTurnsLeft(),
+			"can_hurry": ["%s: costs %d population and %d gold, unhappiness for %d turns" % (n, pop, gold, anger)
+				for (n, h, pop, gold, anger) in opts] or ["no (civics, or nothing that can be hurried)"]}
+	want = args["how"].lower()
+	m = [o for o in opts if o[0] == want or (want == "whip" and o[2] > 0) or (want in ("buy", "gold") and o[2] == 0 and o[3] > 0)]
+	if not m:
+		raise Exception("%s can't hurry by %s now. Options: %s" % (c.getName(), want, ", ".join([o[0] for o in opts]) or "none"))
+	n, h, pop, gold, anger = m[0]
+	c.hurry(HurryTypes(h))
+	writeEvent("hurried", {"city": c.getName(), "item": building, "population": pop, "gold": gold})
+	return {"city": c.getName(), "hurried": building, "paid_population": pop, "paid_gold": gold,
+		"finishes": "at the start of our next turn"}
+
 def aiChooseProduction(gu, argsList):
 	# the game clears a city's queue before asking us, so we put Claude's remaining
 	# items back; only when Claude's queue is used up does the built-in AI choose
@@ -2027,6 +2058,7 @@ COMMANDS = {
 	"war": cmdWar,
 	"do": cmdDo,
 	"build": cmdBuild,
+	"hurry": cmdHurry,
 	"ping": cmdPing,
 	"status": cmdStatus,
 	"map": cmdMap,

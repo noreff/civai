@@ -38,6 +38,9 @@
                            replaces the current item unless --queue (at the end) / --first;
                            --check only tells whether it is possible. The built-in AI then
                            leaves that city's queue alone until it runs empty
+  civ hurry <city> [whip|buy]
+                           the game's Hurry button: without whip/buy only shows the price
+                           (population / gold / unhappiness turns) for the current item
   civ claim <id>           take a unit from the built-in AI: it waits for Claude's orders
   civ release <id|all>     give unit(s) back to the built-in AI
   civ py "<code>"          DIRECTOR ONLY (needs CIV_DEV=1): run Python inside the game (sees everything, logged to exec.log);
@@ -391,6 +394,11 @@ def main(argv):
                 if "--" + flag in argv:
                     args[flag] = True
             print(fmt_record(call("build", args)))
+        elif cmd == "hurry":
+            args = {"name": argv[1]}
+            if len(argv) > 2:
+                args["how"] = argv[2]
+            print(fmt_record(call("hurry", args)))
         elif cmd == "hold":
             print(fmt_record(call("hold")))
         elif cmd == "gate":
