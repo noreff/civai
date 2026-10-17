@@ -1,151 +1,160 @@
-# CIVAI — Claude играет в Civilization IV: BtS
+# CIVAI — Claude plays Civilization IV: Beyond the Sword
 
-## Цель
+## Goal
 
-Сыграть в Civ IV: Beyond the Sword против Claude (или вместе с ним), когда Claude управляет цивилизацией **как живой игрок**:
+Play Civ IV: Beyond the Sword against Claude (or alongside it), with Claude running a civilization **like a live player**:
 
-- видит только то, что видит его цивилизация;
-- может сделать всё, что может человек, на любом уровне: от общей стратегии до каждого рабочего;
-- переписывается с игроком прямо в игре;
-- помнит всю партию: планы, обещания, обиды;
-- оставляет след для видео: что думал, что решил, что скрывал.
+- it sees only what its civilization sees;
+- it can do anything a human can, at any level: from grand strategy down to every single worker;
+- it talks to the player right inside the game;
+- it remembers the whole game: plans, promises, grudges;
+- it leaves a trail for the video: what it thought, what it decided, what it kept secret.
 
-Конечная цель — записать партию и выложить её на YouTube.
+The end goal is to record a game and publish it on YouTube.
 
-## Как это должно ощущаться (для игрока)
+## How it should feel (for the player)
 
-1. Запускаю игру с модом ClaudeBridge и указываю, за какую цивилизацию играет Claude.
-2. Играю свой ход как обычно. Claude в это же время смотрит, думает и отдаёт приказы.
-3. Жму «Конец хода». Если Claude ещё не готов, игра ждёт и показывает «Дарий размышляет…».
-4. Пишу Дарию в игре (по клавише) или в терминале. Ответ появляется в игре через несколько секунд.
-5. Могу договориться о совместных действиях («приведи лучников, вместе берём Вавилон»), и Claude их **реально выполняет**.
-6. Claude сам пишет мне при событиях: встреча, война, захват города, чудо.
-7. Claude помнит, что было 200 ходов назад, даже если его сессию перезапустили.
-8. После партии есть летопись и журнал мыслей с отметками времени для монтажа.
+1. I start the game with the ClaudeBridge mod and say which civilization Claude plays.
+2. I play my turn as usual. Meanwhile Claude looks around, thinks and gives orders.
+3. I press End Turn. If Claude isn't done yet, the game waits and shows "Brennus is still thinking...".
+4. I write to Claude's leader in the game chat (or in the terminal). The answer shows up in the game within seconds.
+5. We can agree on joint actions ("bring your archers, we take Babylon together") and Claude **actually does them**.
+6. Claude writes to me on its own when something happens: first contact, war, a city taken, a wonder.
+7. Claude remembers what happened 200 turns ago, even after its session restarts.
+8. After the game there is a chronicle and a timestamped log of thoughts for editing.
 
-## Принципы
+## Principles
 
-- **Честность встроена в мост.** Любой запрос отвечает только тем, что знает цивилизация Claude. Спросить о скрытом нельзя в принципе.
-- **Те же кнопки, что у человека.** Действия берутся из списка, который игра сама считает доступными для юнита или города. Отдельный код под каждый тип действия не пишем.
-- **Полный контроль на любом уровне.** Claude может вручную вести каждого рабочего. Автоматизация встроенного ИИ — это опция, которую Claude включает сам, как человек, когда считает нужным, а не обязанность.
-- **Ручное управление должно быть дешёвым.** Один вызов — много приказов. Многоходовые приказы: «идти до», очередь построек, очередь работ рабочего («ферма здесь, потом дорога туда»).
-- **Компактный контекст.** Короткая сводка + подробности по запросу + файлы памяти. Всю игру в голове не держим.
-- **Ошибки явные.** «Нельзя основать город: слишком близко к Уруку», а не тихий провал.
-- **Минимум кода.** Без правок ядра игры на C++, пока Python хватает.
+- **Fairness is built into the bridge.** Every query answers only with what Claude's civilization knows. Asking about hidden things is impossible by design. (The dev-only `civ py` sees everything; it is logged and can be switched off with `exec = off` in `config.txt`.)
+- **The same buttons a human has.** Actions come from the list the game itself considers available for a unit or city. No custom code per action type.
+- **Full control at any level.** Claude can drive every worker by hand. The built-in AI's automation is an option Claude turns on when it wants, like a human does, not an obligation.
+- **Manual control must be cheap.** One call, many orders. Multi-turn orders: "go to", build queues, worker job queues ("farm here, then a road there").
+- **Compact context.** A short digest + details on request + memory files. The game is never held in the head as a whole.
+- **Explicit errors.** "Can't found a city here: too close to Uruk", never a silent failure.
+- **Minimal code.** No changes to the game's C++ core while Python is enough.
 
-## Принятые решения (2026-10-14)
-- Встроенный ИИ — автопилот, Claude перехватывает что угодно и на любой срок. Полное ручное управление (вплоть до каждого рабочего) должно быть доступно и дешёво.
-- Игра **всегда ждёт** Claude: ход Дария не начинается, пока Claude не сказал `civ ready`.
-- Каждый ход — короткая проверка (сводка, мелкие приказы, `ready`). Глубокое обдумывание — на событиях, раз в несколько ходов и когда игрок пишет.
-- «Мозг» — сессия Claude Code на личной подписке Max, без API.
+## Decisions (2026-10-14)
+- The built-in AI is the autopilot; Claude takes over anything, for any length of time. Full manual control (down to each worker) must be available and cheap.
+- The game **always waits** for Claude: the AI's turn can't start until Claude says `civ ready`.
+- Every turn gets a quick check (digest, small orders, `ready`). Deep thinking happens on events, every few turns, and when the player writes.
+- The "brain" is a Claude Code session on the personal Max subscription, no API.
 
-## Слои (решение 2026-10-14)
+## Layers (decision 2026-10-14)
 
-| Слой | Что | Зачем |
+| Layer | What | Why |
 |---|---|---|
-| Мод `ClaudeBridge` | Python внутри игры | глаза и руки: мир с туманом войны, приказы, события |
-| Инструмент `civ` | команда в терминале | единый способ говорить с игрой |
-| Скилл `civ4-player` | инструкция для Claude Code | как играть: цикл хода, честность, характер, переписка, память, стратегия BtS |
-| Папка партии `games/<id>/` | файлы памяти | что происходит в этой партии |
+| Mod `ClaudeBridge` | Python inside the game | eyes and hands: the world with fog of war, orders, events |
+| Tool `civ` | terminal command | one way to talk to the game |
+| Skill `civ4-player` | instructions for Claude Code | how to play: turn loop, fairness, persona, chat, memory, BtS strategy |
+| Game folder `games/<id>/` | memory files | what is happening in this particular game |
 
-Скилл пишем содержательно после этапов 3 и 6, когда есть реальные команды и цикл хода. Отдельный MCP-сервер не нужен.
+The skill gets real content after stages 3 and 6, once there are real commands and a real turn loop. No separate MCP server is needed.
 
-## Из чего состоит
+## Parts
 
-### 1. Мост (игра ↔ Claude)
-- Почтовый ящик: папка `C:\claude_bridge\` (на Маке это `…/Bottles/civ4/drive_c/claude_bridge/`).
-- Мод в игре несколько раз в секунду проверяет входящие запросы, выполняет их в игре и кладёт ответ.
-- На Маке команда `civ …` пишет запрос и ждёт ответ. Работает в любой момент: в свой ход, в чужой, между ходами.
+### 1. Bridge (game ↔ Claude)
+- Mailbox: folder `C:\claude_bridge\` (on the Mac: `…/Bottles/civ4/drive_c/claude_bridge/`).
+- The mod checks incoming requests several times a second, runs them inside the game and writes the reply.
+- On the Mac, `civ …` writes a request and waits for the reply (~50 ms). Works at any moment: on my turn, on Claude's, between turns, with the game window in the background.
 
-### 2. Команды
-**Смотреть:**
-- `civ status` — сводка: империя, города, армии, исследование, отношения, что случилось с прошлого раза
-- `civ map [область]` — схема карты (картинка) с туманом войны
-- `civ tile X Y`, `civ city <имя>`, `civ unit <id>`, `civ player <имя>` — подробности, как при наведении мышки
-- `civ events [с хода N]` — журнал событий
-- `civ actions <юнит|город>` — какие «кнопки» сейчас доступны
+### 2. Commands (✅ = exists)
+**Look:**
+- ✅ `civ ping`, `civ status` — digest: empire, cities, units, research, relations
+- ✅ `civ map [X Y [R]]` — schematic map (PNG) with fog of war, plus a zoom
+- ✅ `civ tile X Y`, `civ city <name>`, `civ unit <id>`, `civ player <name|civ|id>` — details, like hovering the mouse
+- ✅ `civ events [N]`, `civ chat [N]` — event log and chat log (read from disk, work without the game)
+- `civ actions <unit|city>` — which "buttons" are available right now
 
-**Делать:**
-- `civ do <юнит(ы)> <действие> [параметры]` — любое доступное действие, можно очередью
-- `civ city <имя> build|queue|hurry …`
+**Do:**
+- ✅ `civ move <id> X Y` — walk a unit, over several turns, also into unexplored areas
+- `civ do <unit(s)> <action> [params]` — any available action, can be queued
+- `civ city <name> build|queue|hurry …`
 - `civ research …`, `civ civics …`, `civ religion …`, `civ slider …`
-- `civ war|peace|deal <игрок> …`
-- `civ say "<текст>"` — сообщение игроку в игре
+- `civ war|peace|deal <player> …`
+- ✅ `civ say "<text>"` — a chat line from Claude's leader in the game (`--popup` for a window)
+- ✅ `civ py "<code>"` — DEV ONLY: run Python inside the game (sees everything, logged to `exec.log`)
 
-**Кто управляет:**
-- `civ claim|release <юниты|города|all>` — взять у встроенного ИИ или отдать ему
-- `civ ready` — я закончил, Дарий может ходить
+**Who's in control:**
+- ✅ `civ claim|release <id|all>` — take a unit from the built-in AI or give it back
+- ✅ `civ gate on|off`, `civ ready` — the player can't end the turn until Claude says it is ready
 
-### 3. Ход и будильник
-- Claude думает во время хода человека. Ходы идут по очереди, так что время есть.
-- Конец хода человека ждёт сигнала `civ ready` (если это возможно, см. проверки).
-- Будильник — журнал событий. Claude будят: сообщение игрока, важное событие, начало нового хода.
+**For the video:**
+- ✅ `civ think "<text>"` — one line of reasoning → `games/<id>/thoughts.jsonl`; every `civ` command → `commands.jsonl` (wall-clock time, for overlays)
 
-### 4. Память (файлы в папке партии)
-- `plan.md` — текущая стратегия
-- `dossiers/<игрок>.md` — обещания, сделки, обиды, доверие
-- `secrets.md` — что скрываю и где блефую
-- `chronicle.md` — летопись; старые эпохи сжимаются
-- всё с номером хода, чтобы видеть откат сейва
+### 3. Turn loop and wake-ups
+- Claude thinks during the human's turn. Turns are sequential, so there is time.
+- The human's End Turn waits for `civ ready` (the `cannotDoControl` hook; "wait at end of turn" is switched on so auto end-turn can't bypass it). Escape hatch: the player types `!go` in chat.
+- Wake-ups come from the event log: a player message, the player's turn starting, the player waiting at End Turn, first contact, war/peace, a city changing hands, a claimed unit arriving, a great person, a religion founded.
 
-### 5. Для видео
-- `thoughts.log` — мысли и решения с временем и номером хода
-- журнал чата
-- позже — озвучка реплик Дария
+### 4. Memory (files in the game folder)
+- `plan.md` — current strategy
+- `dossiers/<player>.md` — promises, deals, grudges, trust
+- `secrets.md` — what I hide and where I bluff
+- `chronicle.md` — the chronicle; old eras get compressed
+- everything stamped with the turn number, so a reloaded save is visible
 
-## Ограничения и ловушки, найденные на практике
-- **Часы внутри игры идут шагами по 128 секунд**: графический движок переводит процессор в режим одинарной точности, и `time.time()` в Python игры бесполезен для коротких интервалов. Всё, что зависит от времени, считаем по кадрам. Из-за этого сначала казалось, что игра «не работает без фокуса», а на самом деле мост работает и в фоне, отвечает за 50 мс.
-- **Python-файлы мода кэшируются при старте игры**, и `reload()` возвращает старый код. Поэтому мост грузится через `imp.load_source` прямо с диска и **перезагружается на лету** при изменении файла. Перезапуск игры нужен только после правок `ClaudeEventManager.py` и XML.
-- Перехваты (чат, клавиши, ИИ юнитов) подключаются к живому менеджеру событий **во время работы** (`installPatches`), поэтому тоже обновляются без перезапуска.
-- Событие «каждый кадр» включается флагом `USE_ON_UPDATE_CALLBACK` в `PythonCallbackDefines.xml` мода; плюс подписка на `gameUpdate`.
-- Английская версия игры не показывает кириллицу: в игре Бренн пишет по-английски (или транслитом).
-- Встроенный ИИ может отменить приказ юниту посреди пути, поэтому юнит, которому Claude отдал приказ, **перехватывается** (claims.json + крючок `AI_unitUpdate`).
-- Мод грузится автоматически (`Mod = Mods\\ClaudeBridge` в `CivilizationIV.ini`), игра в окне 1680×1050.
+### 5. For the video
+- `thoughts.jsonl`, `commands.jsonl`, `chat.jsonl`, `events.jsonl` — all timestamped
+- recording via `rec` (OBS): composite screen, webcam, and separate game / terminal streams
+- later: voice for the leader's lines
 
-## Что сознательно не делаем
-- Не играем через скриншоты и клики по 3D-карте: скриншоты только для видео.
-- Не правим ядро игры на C++ (до тех пор, пока не упрёмся).
-- Не пишем отдельный оркестратор: «мозг» — сессия Claude Code.
-- Не программируем каждое действие отдельно: всё идёт через общий список кнопок.
+## Pitfalls found along the way
+- **The in-game clock moves in 128-second steps**: the graphics engine switches the CPU's floating point to single precision, so `time.time()` in the game's Python is useless for short intervals. Everything time-based uses frame counters. Before we found this, it looked like the game "doesn't work without focus"; in fact the bridge works in the background and answers in ~50 ms.
+- **The game caches the mod's Python files at startup**, and `reload()` returns stale code. So the bridge is loaded with `imp.load_source` straight from disk and **hot-reloads** when the file changes. A game restart is only needed after editing `ClaudeEventManager.py` or the XML.
+- Hooks (chat, keys, unit AI, End Turn) are attached to the live event manager **at runtime** (`installPatches`), so they also update without a restart.
+- The per-frame event is enabled by `USE_ON_UPDATE_CALLBACK` in the mod's `PythonCallbackDefines.xml`; plus a subscription to `gameUpdate`.
+- The English game has no Cyrillic glyphs: in the game Claude's leader writes in English (or Russian transliteration).
+- The built-in AI may cancel a unit's order mid-way, so any unit Claude gives an order to is **claimed** (`claims.json` + the `AI_unitUpdate` hook).
+- The pathfinder only knows revealed tiles: orders into the dark walk toward the closest known tile in that direction and re-plan each turn.
+- The player's turn-start event fires before the game turn counter moves on: label it `turn + 1`. `civ ready` targets the turn the human is playing or about to play.
+- The game's tech tree differs from memory (e.g. in BtS Alphabet needs Writing, which needs Priesthood / Animal Husbandry / Pottery): rules and costs must come from the game's XML / API, never from recollection.
+- The mod loads automatically (`Mod = Mods\ClaudeBridge` in `CivilizationIV.ini`), the game runs windowed at 1680×1050.
 
-## Что нужно проверить заранее (риски)
-1. Можно ли удержать «Конец хода» человека, пока Claude думает.
-2. Слушаются ли юниты ИИ-игрока приказов, отданных вне его хода, и можно ли запретить ИИ их перебивать.
-3. Почтовый ящик в событии обновления: частота, нагрузка, работает ли между ходами.
-4. Как получить «кнопки» юнита или города через список действий игры.
-5. Дипломатические сделки из Python: технологии, золото, ресурсы, границы.
-6. Скорость: сколько уходит на ход в поздней игре при полном ручном управлении.
+## Deliberately not doing
+- No playing through screenshots and clicks on the 3D map: screenshots are for the video only.
+- No changes to the game's C++ core (until we hit a wall).
+- No separate orchestrator: the "brain" is a Claude Code session.
+- No per-action code: everything goes through the game's own list of buttons.
 
-## Этапы
+## Risks to check
+1. ✅ Holding the human's End Turn while Claude thinks — solved with `cannotDoControl`.
+2. ✅ Whether AI units obey orders given outside their turn and whether the AI can be stopped from overriding them — solved with claims.
+3. ✅ Mailbox in the update event: frequency, load, between turns — fine once the 128 s clock was found.
+4. Getting a unit's or city's "buttons" from the game's action list.
+5. Diplomatic deals from Python: techs, gold, resources, borders.
+6. Speed: time per turn late in the game with full manual control.
 
-Каждый этап — маленький кусок: делаем → проверяем вместе в игре → правим → идём дальше.
+## Stages
 
-| # | Этап | Готово, когда |
+Each stage is a small piece: build → check together in the game → fix → move on.
+
+| # | Stage | Done when |
 |---|------|---------------|
-| 0 | Глаза v0: запись мира + схема карты | ✅ сделано 2026-10-14 |
-| 1 | Мост: почтовый ящик, `civ ping`, `civ status` | ✅ 2026-10-14: ответ ~50 мс, в фоне тоже (см. «Ограничения») |
-| 2 | Смотреть по запросу: `map`, `tile`, `city`, `unit`, `player`, `events` | ✅ 2026-10-14 |
-| 3 | Кнопки: `actions` + `do` для юнитов и городов, исследование | ⏳ есть `move`; общий список кнопок, города, исследование — дальше. Есть `civ py` для разработки |
-| 4 | Перехват у ИИ: `claim` / `release`; война и мир только по решению Claude | ⏳ юниты ✅ (разведчик стоит у коров); война и мир, города — дальше |
-| 5 | Синхронизация хода: `ready` | ✅ 2026-10-14: крючок `cannotDoControl` блокирует «Конец хода» человека, пока Claude не сказал `civ ready`; `!go` в чате — запасной выход; начало хода и ожидание будят Claude |
-| 6 | Будильник: события будят Claude | при встрече Claude сам пишет первым |
-| 7 | Чат в игре | ✅ 2026-10-14: обычный чат игры (Tab) в обе стороны, `civ say`, `civ chat`; Claude будит слежка за `chat.jsonl` |
-| 8 | Скилл `civ4-player` + память: файлы и правила обновления | новая сессия со скиллом продолжает партию с тем же характером |
-| 9 | Дипломатия: сделки | обмен технологиями, мир, открытые границы через чат |
-| 10 | Пробная партия без записи | список того, что медленно и неудобно, исправлен |
-| 11 | Видео: журнал мыслей, оверлеи, озвучка, запись | первый ролик |
+| 0 | Eyes v0: world dump + schematic map | ✅ 2026-10-14 |
+| 1 | Bridge: mailbox, `civ ping`, `civ status` | ✅ 2026-10-14: ~50 ms replies, also in the background (see "Pitfalls") |
+| 2 | Look on request: `map`, `tile`, `city`, `unit`, `player`, `events` | ✅ 2026-10-14 |
+| 3 | Buttons: `actions` + `do` for units and cities, research | ⏳ `move` exists; the general button list, cities and research are next. `civ py` covers dev needs meanwhile |
+| 4 | Taking over from the AI: `claim` / `release`; war and peace only by Claude's decision | ⏳ units ✅ (the scout stood by the cows); war/peace and cities are next |
+| 5 | Turn sync: `ready` | ✅ 2026-10-14: `cannotDoControl` blocks the human's End Turn until `civ ready`; `!go` in chat is the escape hatch; turn start and waiting wake Claude |
+| 6 | Wake-ups: events wake Claude | ✅ mostly: Monitor on `events.jsonl` (re-arm every 30 min); Claude wrote first on meeting the Khan |
+| 7 | In-game chat | ✅ 2026-10-14: the game's own chat (Tab) both ways, `civ say`, `civ chat` |
+| 8 | Skill `civ4-player` + memory: files and update rules | a fresh session with the skill continues the game with the same personality |
+| 9 | Diplomacy: deals | tech trades, peace, open borders agreed in chat |
+| 10 | Test game without recording | a list of what is slow or annoying, fixed |
+| 11 | Video: thought log, overlays, voice, recording | first video |
 
-## Состояние на 2026-10-14, вечер (живая партия)
+## State as of 2026-10-14, evening (live game)
 
-- Партия: Бренн (кельты, игрок 1) = Claude; V (Испания, игрок 0) = человек; Англия (Виктория), Монголия (Хубилай, встречен на ходу 42), ещё одна цивилизация не встречена. Ход ~43.
-- Блокировка хода включена (`civ gate on`): каждый ход Claude говорит `civ ready`. Слежка: Monitor на `events.jsonl` (чат, начало хода, ожидание, встречи, войны, «юнит дошёл»); монитор живёт 30 минут, его надо перезапускать.
-- Разведчик #16385 под контролем Claude, идёт к (25, 24) («10 на запад и 5 на север от коров»). Бибракта: рабочий → поселенец. Исследования: Земледелие → Жречество → Writing → Alphabet.
-- Память партии: `games/celts-vs-spain/` — `dossiers/spain.md` (пакт об Алфавите: кто первым откроет, отдаёт другому бесплатно; обмены Archery↔Agriculture, Masonry↔Mining), `dossiers/mongolia.md`, `thoughts.jsonl` и `commands.jsonl` (время для монтажа).
-- Запись: `rec` (OBS спрятан) пишет общий кадр + камеру в `~/youtube/raw/ml-systems/2026-10-14_21*` (перенести в `~/youtube/raw/civ4-claude/` после «стоп») и отдельные потоки игры и kitty через Source Record в `~/youtube/raw/civ4-claude/streams/`. В `rec` добавлен источник `civ4`, слой kitty поверх игры. `rec mark` на интересных моментах.
+- Game: Brennus (Celts, player 1) = Claude; V (Spain, player 0) = human; England (Victoria), Mongolia (Kublai Khan, met on turn 42), one more civilization not met yet. Turn ~43.
+- Turn gate is on (`civ gate on`): Claude says `civ ready` every turn. Wake-ups: a Monitor on `events.jsonl` (chat, turn start, waiting, contact, wars, "unit arrived"); a monitor lives 30 minutes and must be re-armed.
+- Scout #16385 is claimed by Claude, heading to (25, 24) ("10 west and 5 north of the cows"). Bibracte: worker → settler. Research: Agriculture → Priesthood → Writing → Alphabet.
+- Game memory: `games/celts-vs-spain/` — `dossiers/spain.md` (the Alphabet pact: whoever gets it first gives it to the other for free; trades Archery↔Agriculture and Masonry↔Mining), `dossiers/mongolia.md`, `thoughts.jsonl` and `commands.jsonl` (timestamps for editing).
+- Recording: `rec` (OBS hidden) writes the composite screen + webcam to `~/youtube/raw/ml-systems/2026-10-14_21*` (move to `~/youtube/raw/civai/` after "stop"), and separate game and kitty streams via Source Record to `~/youtube/raw/civ4-claude/streams/` (rename to `civai` after "stop"). `rec` got a `civ4` capture; the kitty layer sits above the game. Use `rec mark` at interesting moments.
 
-### Ближайшие задачи
-1. Этап 3: общий механизм действий (кнопки юнитов и городов), исследование и производство честными командами вместо `civ py`.
-2. Идея на решение игрока: «готов наперёд, буди только по событиям», чтобы пустые ходы не ждали Claude.
-3. Баг: первая встреча пишется дважды (сначала «an unknown civilization»).
-4. Правило для скилла: дерево технологий и правила брать из XML/игры, а не по памяти (Alphabet в BtS требует Writing ← Priesthood/Animal Husbandry/Pottery).
-5. Скилл `civ4-player` (этап 8).
+### Next tasks
+1. Stage 3: the general action mechanism (unit and city buttons), research and production as fair commands instead of `civ py`.
+2. Idea pending the player's decision: "ready in advance, wake me only on events", so empty turns don't wait for Claude.
+3. Bug: first contact is logged twice (first as "an unknown civilization").
+4. Rule for the skill: take the tech tree and rules from the game's XML / API, not from memory.
+5. Skill `civ4-player` (stage 8).
+6. Rename the mod `ClaudeBridge` → CIVAI at the next game restart.
