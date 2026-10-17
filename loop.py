@@ -30,6 +30,7 @@ WAKE_KINDS = ("message_from_player", "claude_wake", "player_waiting", "deal_done
 NOISE = ("auto_ready", "claude_ready", "my_turn_begins", "player_turn_begins", "combat_animal")
 MEMORY = ("persona.md", "ambitions.md", "plan.md", "secrets.md", "chronicle.md")
 CHAT_LINES = 30             # recent chat shown on every wake-up, new lines marked
+AMBITIONS_STALE = 30        # turns: past this, the brief says the ambitions haven't been revised
 MEMORY_TOKENS_WARN = 12000  # past this, the brief asks the agent to trim its memory files
 GATHER_SECONDS = 4          # a burst of events (chat + turn start...) becomes one wake-up
 
@@ -75,6 +76,18 @@ def read_from(path, pos):
     return rows, pos + len(data)
 
 
+_human = []
+
+
+def human_name():
+    # the human leader's name, as the game shows it ("V (India)"), so the brief never says "the human"
+    if not _human:
+        m = re.search(r"^  (.+?) of (.+?) \[HUMAN\]", civ("status"), re.M)
+        if m:
+            _human.append("%s (%s)" % (m.group(1), m.group(2)))
+    return _human[0] if _human else "the human leader"
+
+
 def fmt_event(e):
     skip = ("kind", "turn", "year", "time")
     rest = ", ".join("%s=%s" % (k, v) for k, v in e.items() if k not in skip)
@@ -86,18 +99,33 @@ def brief(events, chat, reasons):
              "## Since your last wake-up", ""]
     shown = [fmt_event(e) for e in events if e.get("kind") not in NOISE]
     parts += shown[-100:] or ["(no game events)"]
-    parts += ["", "## Chat (the last %d lines; NEW = the human wrote it since your last wake-up)" % CHAT_LINES, ""]
+    parts += ["", "## Chat (the last %d lines; NEW = written to you since your last wake-up)" % CHAT_LINES, ""]
     new_ids = set(json.dumps(c, sort_keys=True) for c in chat)
     recent, _ = read_from(CHAT, 0)
     parts += ["%sT%s %s: %s" % ("NEW " if json.dumps(c, sort_keys=True) in new_ids and c.get("from") != "claude" else "    ", c.get("turn"),
-              "you" if c.get("from") == "claude" else "the human", c.get("text")) for c in recent[-CHAT_LINES:]] or ["(none)"]
+              "you" if c.get("from") == "claude" else human_name(), c.get("text")) for c in recent[-CHAT_LINES:]] or ["(none)"]
     parts += ["", "## Your last wake-ups (what you did)", ""]
     parts += recent_wakes(3) or ["(none)"]
     status = civ("status")
+    parts += ambitions_note(status)
     parts += ["", "## State now", "", status, "", civ("research"), "", civ("offers"), "",
               "### Ongoing deals", "", civ("deals"), "", "### Budget", "", civ("budget"), "", civ("gate")]
     parts += ["", "## Map of my land", "", my_land_map(status)]
     return "\n".join(parts)
+
+
+def ambitions_note(status):
+    # a nudge, like the memory-size one: goals nobody revisits stop driving anything
+    try:
+        _, d = game_dir()
+        turns = [int(t) for t in re.findall(r"\bT(\d+)", open(os.path.join(d, "ambitions.md")).read())]
+        now = int(re.search(r"Turn (\d+),", status).group(1))
+    except (OSError, AttributeError, ValueError):
+        return []
+    if turns and now - max(turns) > AMBITIONS_STALE:
+        return ["", "**Your ambitions were last revised at T%d, %d turns ago. Are they still what you want, "
+                "and are you winning? Revise ambitions.md on this wake-up.**" % (max(turns), now - max(turns))]
+    return []
 
 
 def my_land_map(status):
@@ -146,7 +174,7 @@ def prompt_for(d, events, chat, reasons):
                 "about a page, compress old chronicle eras, keep dossiers as summaries.**" % (size, MEMORY_TOKENS_WARN))
     # fixed parts first (they stay cached between wake-ups), fresh parts last
     return "\n\n".join([
-        "You are playing the current CIVAI game. This is ONE wake-up: act on it and finish. "
+        "You are the leader in persona.md, playing the current CIVAI game to win. This is ONE wake-up: act on it and finish. "
         "You remember nothing between wake-ups except the files in the game folder, so before you finish, "
         "write down in them whatever your future self must know. The playbook is your full instruction set; "
         "skip its 'Start of a session' and 'Turn loop' listening steps: the loop wakes you.",
@@ -216,7 +244,7 @@ def reasons_of(events):
         if k == "claude_wake":
             out.append("turn %s: %s" % (e.get("turn"), ", ".join(e.get("reasons", []))))
         elif k == "message_from_player":
-            out.append('the human wrote: "%s"' % e.get("text"))
+            out.append('%s wrote: "%s"' % (human_name(), e.get("text")))
         else:
             out.append(k)
     return out
