@@ -87,8 +87,24 @@ def brief(events, chat, reasons):
     parts += shown[-40:] or ["(no game events)"]
     parts += ["", "## Chat since your last wake-up", ""]
     parts += ["T%s %s: %s" % (c.get("turn"), c.get("from"), c.get("text")) for c in chat[-20:]] or ["(none)"]
+    parts += ["", "## Your last wake-ups (what you did)", ""]
+    parts += recent_wakes(3) or ["(none)"]
     parts += ["", "## State now", "", civ("status"), "", civ("research"), "", civ("offers"), "", civ("gate")]
     return "\n".join(parts)
+
+
+def recent_wakes(n):
+    # short-term memory: the final words of the last few wake-ups
+    _, d = game_dir()
+    names = sorted(os.listdir(os.path.join(d, "wakes")), key=lambda x: os.path.getmtime(os.path.join(d, "wakes", x)))
+    out = []
+    for name in names[-n:]:
+        text = open(os.path.join(d, "wakes", name)).read()
+        head = text.splitlines()[0].lstrip("# ")
+        why = next((l for l in text.splitlines() if l.startswith("**Why:**")), "")
+        words = text.split("**Final words:**", 1)[-1].split("\n_")[0].strip()
+        out.append("- %s. %s %s" % (head, why.replace("**Why:**", "Why:").strip(), " ".join(words.split())[:600]))
+    return out
 
 
 def prompt_for(d, events, chat, reasons):
