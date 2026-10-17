@@ -31,6 +31,12 @@
                            (the built-in AI can't change religion or civics for us: the
                            bridge undoes its changes, event ai_change_undone)
   civ war <player>         declare war (only Claude declares wars for its civ)
+  civ deals                our ongoing deals (open borders, pacts, resources...) and when each can be cancelled
+  civ cancel <deal#|player>  end an ongoing deal, like the diplomacy screen's "cancel" (the other side remembers)
+  civ budget [research N gold N culture N espionage N | auto]
+                           the commerce split: show it, or set it (steps of 10, sum 100; gold takes
+                           what's left); kept every turn until `civ budget auto` hands it back to the AI
+  civ raze <city>          burn a city we just captured (this turn or last); otherwise captured cities are kept
   civ area X Y [R]         text map of the region around X Y (radius R, default 6) with cities,
                            resources, foreign units, borders, and the best city sites there
   civ research [tech] [--queue]
@@ -380,6 +386,14 @@ def main(argv):
             print(fmt_record(call("offers")))
         elif cmd == "war":
             print(fmt_record(call("war", {"player": argv[1]})))
+        elif cmd == "deals":
+            print("\n".join(call("deals")["deals"]))
+        elif cmd == "cancel":
+            print(fmt_record(call("cancel", {"what": " ".join(argv[1:])})))
+        elif cmd == "budget":
+            print(fmt_record(call("budget", {"set": argv[1:]} if len(argv) > 1 else {})))
+        elif cmd == "raze":
+            print(fmt_record(call("raze", {"name": " ".join(argv[1:])})))
         elif cmd == "area":
             xy = " ".join(argv[1:]).replace(",", " ").split()
             args = {"x": int(xy[0]), "y": int(xy[1])}

@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 30
+BRIDGE_VERSION = 31
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -679,14 +679,19 @@ def recordEvent(tag, a):
 			answerOffer(text.strip(), human and human[0] or 0)
 		else:
 			writeEvent("message_from_player", {"text": text, "via": "chat"})
-	elif tag == "BeginPlayerTurn" and a[1] == iMe:
-		writeEvent("my_turn_begins", {})
-		refreshSnapshot()
-	elif tag == "BeginPlayerTurn" and gc.getPlayer(a[1]).isHuman():
-		# fired before the game turn counter moves on: the player is about to play turn a[0] + 1
-		writeEvent("player_turn_begins", {"gate": readGate().get("on", False), "turn": a[0] + 1})
-		refreshSnapshot()
-		autoReadyOrWake(a[0] + 1)
+	elif tag == "BeginPlayerTurn":
+		# deals other leaders made with our civ during the turn that just ended
+		try:
+			checkNativeDeal(g_turnOf[0])
+		except:
+			log("native deal check FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
+		g_turnOf[0] = a[1]
+		if a[1] == iMe:
+			writeEvent("my_turn_begins", {})
+		elif gc.getPlayer(a[1]).isHuman():
+			# fired before the game turn counter moves on: the player is about to play turn a[0] + 1
+			writeEvent("player_turn_begins", {"gate": readGate().get("on", False), "turn": a[0] + 1})
+			autoReadyOrWake(a[0] + 1)
 	elif tag == "firstContact" and iTeam in (a[0], a[1]):
 		other = a[1]
 		if other == iTeam:
@@ -990,8 +995,14 @@ def installPatches():
 	if not hasattr(gu, "_claudeOrigDoWar"):
 		gu._claudeOrigDoWar = gu.AI_doWar
 	gu.AI_doWar = doWarTrampoline
+	if not hasattr(gu, "_claudeOrigDoGold"):
+		gu._claudeOrigDoGold = gu.doGold
+	gu.doGold = doGoldTrampoline
+	if not hasattr(gu, "_claudeOrigCanRaze"):
+		gu._claudeOrigCanRaze = gu.canRazeCity
+	gu.canRazeCity = canRazeTrampoline
 	g_patched[0] = True
-	log("hooks installed: chat, unit claims, city claims, diplomacy, war, turn gate")
+	log("hooks installed: chat, unit claims, city claims, diplomacy, war, budget, razing, turn gate")
 
 def cmdSay(args):
 	# a chat line in the game's chat log (like a human opponent), or a popup with popup=true
@@ -1289,6 +1300,11 @@ def guardChoices():
 	if want is None:
 		saveChoices(now)   # start from whatever the civ has now
 		return
+	if want.get("budget") and want["budget"] != budgetNow(p):
+		before = budgetNow(p)
+		applyBudget(p, want["budget"])   # the AI re-split it (it does so whenever income changes)
+		if p.getGold() + p.calculateGoldRate() < 0:
+			applyBudget(p, before)
 	undone = []
 	if now["religion"] != want["religion"]:
 		p.setLastStateReligion(want["religion"])
@@ -1367,16 +1383,140 @@ def cmdCivics(args):
 	saveChoices(c)
 	return {"civics": [gc.getCivicInfo(x).getDescription() for x in new], "anarchy_turns": anarchy}
 
-# ------------------------------------------------- deals made in the game's own screen
+# ------------------------------------------------- the budget slider is Claude's
 #
-# When the human trades with Claude's civ through the normal diplomacy screen, the
-# built-in AI decides and no event tells us. So during the human's turn the bridge
-# compares snapshots of what Claude's civ has (techs, gold, open borders, pacts, war,
-# resource imports/exports) and reports an unexplained change as "native_deal":
-# in the story, Claude's ministers traded on their own authority.
+# The built-in AI resets the gold/research/culture/espionage split every turn
+# (AI_doCommerce, no hook). The game's doGold hook runs after that and before gold and
+# research are counted, so the split Claude chose (`civ budget`, kept in choices.json)
+# is put back there. If it would leave the treasury below zero (the game then disbands
+# units), the AI's split stays for that turn and Claude is told.
+
+def budgetNow(p):
+	return [p.getCommercePercent(CommerceTypes(i)) for i in range(len(COMMERCES))]
+
+def applyBudget(p, want):
+	for k in range(3):
+		for i in range(len(want)):
+			if p.getCommercePercent(CommerceTypes(i)) != want[i]:
+				p.setCommercePercent(CommerceTypes(i), want[i])
+
+def budgetInfo(p):
+	return {"split": ", ".join(["%s %d%%" % (COMMERCES[i], v) for i, v in enumerate(budgetNow(p)) if v or i < 2]),
+		"per_turn": ", ".join(["%s %d" % (COMMERCES[i], p.getCommerceRate(CommerceTypes(i))) for i in range(len(COMMERCES))]),
+		"gold": p.getGold(), "gold_change_per_turn": p.calculateGoldRate(),
+		"adjustable": [COMMERCES[i] for i in range(len(COMMERCES)) if i == 0 or p.isCommerceFlexible(CommerceTypes(i))]}
+
+def cmdBudget(args):
+	# no args: the split now; "research 70 gold 30": set it (steps of 10, summing to 100); "auto": back to the AI
+	p = gc.getPlayer(getClaudePlayer())
+	if not args.get("set"):
+		r = budgetInfo(p)
+		if (loadChoices() or {}).get("budget"):
+			r["chosen_by"] = "you (kept every turn)"
+		else:
+			r["chosen_by"] = "the built-in AI (until you set it)"
+		return r
+	if [w for w in args["set"] if w.lower() == "auto"]:
+		c = loadChoices() or currentChoices(p)
+		if c.has_key("budget"):
+			del c["budget"]
+		saveChoices(c)
+		r = budgetInfo(p)
+		r["chosen_by"] = "the built-in AI again"
+		return r
+	want = [0] * len(COMMERCES)
+	words = args["set"]
+	for j in range(0, len(words) - 1, 2):
+		k = words[j].lower()
+		if k not in COMMERCES:
+			raise Exception("%s? say e.g. research 70 gold 30 (also culture, espionage)" % words[j])
+		want[COMMERCES.index(k)] = int(words[j + 1])
+	step = gc.getDefineINT("COMMERCE_PERCENT_CHANGE_INCREMENTS")
+	if sum(want) != 100 or [v for v in want if v % step or v < 0]:
+		raise Exception("the split must add up to 100 in steps of %d: %s" % (step, want))
+	cur = budgetNow(p)
+	for i in range(len(want)):
+		if i and want[i] != cur[i] and not p.isCommerceFlexible(CommerceTypes(i)):   # gold takes the rest
+			raise Exception("we can't adjust %s yet (needs a tech)" % COMMERCES[i])
+	c = loadChoices() or currentChoices(p)
+	c["budget"] = want
+	saveChoices(c)
+	applyBudget(p, want)
+	r = budgetInfo(p)
+	if r["gold"] + r["gold_change_per_turn"] < 0:
+		r["warning"] = "this split runs the treasury dry: the AI's split will be used on such turns until you change it"
+	return r
+
+def doGoldHook(gu, argsList):
+	try:
+		if argsList[0] == getClaudePlayer():
+			p = gc.getPlayer(argsList[0])
+			want = (loadChoices() or {}).get("budget")
+			if want and want != budgetNow(p):
+				before = budgetNow(p)
+				applyBudget(p, want)
+				if p.getGold() + p.calculateGoldRate() < 0:
+					applyBudget(p, before)
+					writeEvent("budget_suspended", {"note": "your split would leave us below zero gold this turn; "
+						"the built-in AI's split was used instead", "split": before})
+	except:
+		log("doGold hook FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
+	return gu._claudeOrigDoGold(argsList)
+
+def doGoldTrampoline(argsList):
+	import CvGameInterfaceFile
+	return sys.modules["ClaudeBridge"].doGoldHook(CvGameInterfaceFile.GameUtils, argsList)
+
+# ------------------------------------------------- captured cities: keep or burn is Claude's
+#
+# When our units take a city, the built-in AI would decide on the spot whether to raze
+# it (AI_conquerCity). The canRazeCity hook stops that: the city is kept (size-1 cities
+# still burn by the game's own rule), Claude is woken (city_changed_hands) and may
+# raze it with `civ raze` on that turn or the next.
+
+g_razeOK = [False]
+
+def canRazeHook(gu, argsList):
+	iPlayer, city = argsList
+	if iPlayer == getClaudePlayer() and not g_razeOK[0] and city.getHighestPopulation() > 1:
+		return False
+	return gu._claudeOrigCanRaze(argsList)
+
+def canRazeTrampoline(argsList):
+	import CvGameInterfaceFile
+	return sys.modules["ClaudeBridge"].canRazeHook(CvGameInterfaceFile.GameUtils, argsList)
+
+def cmdRaze(args):
+	iMe = getClaudePlayer()
+	p = gc.getPlayer(iMe)
+	c = findCity({"name": args["name"]})
+	if c.getOwner() != iMe:
+		raise Exception("%s isn't ours" % c.getName())
+	if c.getPreviousOwner() in (-1, iMe) or c.getGameTurnAcquired() < gc.getGame().getGameTurn() - 1:
+		raise Exception("only a city we just captured (this turn or last) can be razed")
+	g_razeOK[0] = True
+	try:
+		if not p.canRaze(c):
+			raise Exception("the game won't let us raze %s (game option, or too much of its culture is ours)" % c.getName())
+		name, pop = c.getName(), c.getPopulation()
+		p.raze(c)
+	finally:
+		g_razeOK[0] = False
+	return {"razed": name, "population_was": pop}
+
+# ------------------------------------------------- deals Claude didn't make
+#
+# The built-in AI still answers for Claude's civ in two places the game gives no hook
+# for: the human's own diplomacy screen, and deals other AI leaders propose during
+# their turns. So the bridge compares snapshots of what Claude's civ has (techs, gold,
+# open borders, pacts, war, resource imports/exports): often during the human's turn,
+# and at every hand-over from one player's turn to the next. An unexplained change is
+# reported as "native_deal" (in the story: Claude's ministers agreed on their own);
+# ongoing parts of it can be ended with `civ cancel`, under the game's normal rules.
 
 g_snap = [None]
 g_snapTick = [0]
+g_turnOf = [None]   # whose turn is running (set at BeginPlayerTurn)
 
 def takeSnapshot():
 	iMe, iTeam = myIds()
@@ -1400,49 +1540,144 @@ def refreshSnapshot():
 	except:
 		g_snap[0] = None
 
-def checkNativeDeal():
-	# called often during the human's turn; cheap enough every couple of seconds
-	g_snapTick[0] = g_snapTick[0] + 1
-	if g_snapTick[0] % 40:
-		return
-	if not humanPlayers() or not [i for i in humanPlayers() if gc.getPlayer(i).isTurnActive()]:
-		return
+def checkNativeDeal(during=-1):
+	# during=-1: the periodic check while the human plays (throttled);
+	# otherwise: a turn just ended, `during` is whose turn it was (None if unknown)
+	iMe = getClaudePlayer()
+	if during == -1:
+		g_snapTick[0] = g_snapTick[0] + 1
+		if g_snapTick[0] % 40:
+			return
+		if not humanPlayers() or not [i for i in humanPlayers() if gc.getPlayer(i).isTurnActive()]:
+			return
 	old = g_snap[0]
 	new = takeSnapshot()
 	g_snap[0] = new
-	if old is None:
-		return
+	if old is None or during == iMe:
+		return   # on our own turn nobody can make a deal for us: research, huts, our own orders
+	aiTurn = during not in (-1, None) and not gc.getPlayer(during).isHuman()
 	# a tech we were researching just finished: research, not a deal
 	got = [gc.getTechInfo(t).getDescription() for t in new["techs"] if t not in old["techs"] and t not in old.get("researching", [])]
 	lost = [gc.getTechInfo(t).getDescription() for t in old["techs"] if t not in new["techs"]]
-	changes = []
+	changes, real, who = [], [], []
 	if got:
-		changes.append("we got " + ", ".join(got))
+		real.append("we got " + ", ".join(got))
 	if lost:
-		changes.append("we lost " + ", ".join(lost))
+		real.append("we lost " + ", ".join(lost))
 	for i, rel in new["rel"].items():
 		was = old["rel"].get(i)
 		if was is None:
 			continue
+		warStarted = rel[2] and not was[2]
 		for k, name in ((0, "open borders"), (1, "defensive pact"), (2, "war")):
-			if rel[k] != was[k]:
-				state = "ended"
-				if rel[k]:
-					state = "started"
-				changes.append("%s with %s %s" % (name, pname(i), state))
+			if rel[k] == was[k]:
+				continue
+			if warStarted and (k == 2 or not rel[k]):
+				continue   # a declaration of war (its own event) ends treaties by itself: not a deal
+			state = "ended"
+			if rel[k]:
+				state = "started"
+			real.append("%s with %s %s" % (name, pname(i), state))
+			who.append(i)
 		gained = [gc.getTechInfo(t).getDescription() for t in new["theirs"].get(i, []) if t not in old["theirs"].get(i, [])]
 		if gained:
 			changes.append("%s gained %s at the same time" % (pname(i), ", ".join(gained)))
 	for b in dict(new["res"].items() + old["res"].items()).keys():
 		a, z = old["res"].get(b, [0, 0]), new["res"].get(b, [0, 0])
 		if a != z:
-			changes.append("%s: importing %d (was %d), exporting %d (was %d)" % (gc.getBonusInfo(b).getDescription(), z[0], a[0], z[1], a[1]))
-	if not [c for c in changes if not c.endswith("at the same time")]:
+			real.append("%s: importing %d (was %d), exporting %d (was %d)" % (gc.getBonusInfo(b).getDescription(), z[0], a[0], z[1], a[1]))
+	# between other players' turns our gold only moves by deals (tribute, gifts, trades)
+	if aiTurn and new["gold"] != old["gold"]:
+		real.append("our gold %d -> %d" % (old["gold"], new["gold"]))
+	if not real:
 		return   # only someone else's research moved: not a deal with us
-	if new["gold"] != old["gold"]:
-		changes.append("our gold %d -> %d" % (old["gold"], new["gold"]))
-	writeEvent("native_deal", {"changes": changes,
-		"note": "made in the game's own diplomacy screen; the built-in AI agreed on our behalf"})
+	if not aiTurn and new["gold"] != old["gold"]:
+		real.append("our gold %d -> %d" % (old["gold"], new["gold"]))
+	d = {"changes": real + changes}
+	if aiTurn:
+		d["during_turn_of"] = pname(during)
+		d["note"] = ("during %s's turn: an AI leader proposed this and the built-in AI accepted for us "
+			"(or the other side ended a deal)" % pname(during))
+	else:
+		d["note"] = "made in the game's own diplomacy screen; the built-in AI agreed on our behalf"
+	if [x for x in real if x.find("started") >= 0 or x.find("importing") >= 0]:
+		d["note"] = d["note"] + ". Ongoing deals: see `civ deals`, end one with `civ cancel`"
+	writeEvent("native_deal", d)
+
+# ------------------------------------------------- ongoing deals: list and cancel
+
+TRADE_NAMES = {}
+
+def tradeName(t):
+	if not TRADE_NAMES:
+		for k in dir(TradeableItems):
+			if k.startswith("TRADE_"):
+				TRADE_NAMES[int(getattr(TradeableItems, k))] = k[6:].lower()
+	kind = TRADE_NAMES.get(int(t.ItemType), "item %d" % int(t.ItemType))
+	if kind == "technologies":
+		return "tech " + gc.getTechInfo(t.iData).getDescription()
+	if kind == "resources":
+		return gc.getBonusInfo(t.iData).getDescription()
+	if kind in ("gold", "gold_per_turn"):
+		return "%d %s" % (t.iData, kind.replace("_", " "))
+	if kind == "cities":
+		return "a city"
+	return kind.replace("_", " ")
+
+def ourDeals():
+	iMe = getClaudePlayer()
+	g = gc.getGame()
+	out = []
+	for i in range(g.getIndexAfterLastDeal()):
+		d = g.getDeal(i)
+		if d.isNone() or iMe not in (d.getFirstPlayer(), d.getSecondPlayer()):
+			continue
+		first = [tradeName(d.getFirstTrade(j)) for j in range(d.getLengthFirstTrades())]
+		second = [tradeName(d.getSecondTrade(j)) for j in range(d.getLengthSecondTrades())]
+		if d.getFirstPlayer() == iMe:
+			other, give, get = d.getSecondPlayer(), first, second
+		else:
+			other, give, get = d.getFirstPlayer(), second, first
+		out.append((d, other, give, get))
+	return out
+
+def dealCancelState(d, give, get):
+	if [x for x in give + get if x in ("peace treaty", "vassal", "surrender")]:
+		return "can't be cancelled (peace treaties run out by themselves; vassal deals aren't supported)"
+	left = d.getInitialGameTurn() + gc.getDefineINT("PEACE_TREATY_LENGTH") - gc.getGame().getGameTurn()
+	if left > 0:
+		return "can be cancelled in %d turns" % left
+	return "can be cancelled now"
+
+def dealLine(d, other, give, get):
+	return "#%d with %s since turn %d: we give %s; they give %s (%s)" % (d.getID(), pname(other), d.getInitialGameTurn(),
+		", ".join(give) or "nothing", ", ".join(get) or "nothing", dealCancelState(d, give, get))
+
+def cmdDeals(args):
+	return {"deals": [dealLine(*x) for x in ourDeals()] or ["none"]}
+
+def cmdCancel(args):
+	# end an ongoing deal by its number or by the other player, like the diplomacy screen's "cancel deal"
+	want = unicode(args["what"]).strip().lstrip("#")
+	deals = ourDeals()
+	pick = [x for x in deals if str(x[0].getID()) == want]
+	if not pick:
+		other = findPlayer(want)
+		pick = [x for x in deals if x[1] == other]
+		if not pick:
+			raise Exception("no ongoing deal with %s" % pname(other))
+		if len(pick) > 1:
+			raise Exception("several deals with %s, name one by its number: %s" % (pname(other),
+				"; ".join([dealLine(*x) for x in pick])))
+	d, other, give, get = pick[0]
+	state = dealCancelState(d, give, get)
+	if state != "can be cancelled now":
+		raise Exception("deal #%d %s" % (d.getID(), state))
+	line = dealLine(d, other, give, get)
+	d.kill()   # the game's own cancel: both sides are told, the other leader remembers it
+	refreshSnapshot()
+	writeEvent("deal_cancelled", {"deal": line, "by": pname(getClaudePlayer())})
+	return {"cancelled": line}
 
 # ------------------------------------------------------------------------ deals
 #
@@ -2256,6 +2491,10 @@ COMMANDS = {
 	"civics": cmdCivics,
 	"rules": cmdRules,
 	"war": cmdWar,
+	"deals": cmdDeals,
+	"cancel": cmdCancel,
+	"budget": cmdBudget,
+	"raze": cmdRaze,
 	"do": cmdDo,
 	"build": cmdBuild,
 	"hurry": cmdHurry,

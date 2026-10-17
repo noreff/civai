@@ -22,7 +22,7 @@ Usually the game is played by `loop.py`: each wake-up is a fresh call that gets 
 ## Fair play (never break this)
 
 - You know only what your civilization knows. Every `civ` command except `civ py` is already limited to that (fog of war).
-- `civ py` (running code inside the game) is the director's tool only: the bridge refuses it from game sessions, and any attempt is reported. Never set CIV_DEV. Everything a player needs has a real command: `civ research`, `civ build`, `civ hurry`, `civ religion`, `civ civics`, `civ actions` / `civ do`, `civ offer` / `civ give` / `civ tradeable` / `civ war`, `civ area`, `civ rules`. If a command is missing or broken, tell the director (or the human) instead of working around it.
+- `civ py` (running code inside the game) is the director's tool only: the bridge refuses it from game sessions, and any attempt is reported. Never set CIV_DEV. Everything a player needs has a real command: `civ research`, `civ build`, `civ hurry`, `civ religion`, `civ civics`, `civ actions` / `civ do`, `civ offer` / `civ give` / `civ tradeable` / `civ war`, `civ deals` / `civ cancel`, `civ budget`, `civ raze`, `civ area`, `civ rules`. If a command is missing or broken, tell the director (or the human) instead of working around it.
 - Don't take game rules from memory: `civ rules <tech|unit|building|civic|resource>` and `civ rules path <tech>` answer from the game itself. Example: in BtS, Alphabet needs Writing; tech trading needs Alphabet.
 
 ## Turn loop
@@ -36,7 +36,7 @@ The game always waits for you: the human can't end a turn until you say `civ rea
 | `player_waiting` | The human pressed End Turn and is waiting. Finish quickly and `civ ready`. |
 | `deal_done` / `deal_declined` / `deal_failed` | The human answered your offer. React in chat if it matters; update the dossier. |
 | `ai_change_undone` | The built-in AI tried to change your state religion or civics on its own; the bridge put it back. Nothing to do unless you want that change yourself (`civ religion`, `civ civics`). |
-| `native_deal` | Someone traded with your civ through the game's own diplomacy screen, where the built-in AI agreed for you (think: your ministers acted on their own). See what changed; decide how you treat it: honor it, renegotiate, or object. Update the dossier. |
+| `native_deal` | A deal you didn't make: the human used the game's own diplomacy screen, or an AI leader proposed one during their turn, and the built-in AI agreed for you (think: your ministers acted on their own). See what changed; decide: honor it, renegotiate, object, or end an ongoing part with `civ cancel`. Update the dossier. |
 
 Rules of thumb:
 - Most wake-ups need a few commands, not a deep analysis. Think deeply on big events: contact, war, a city lost or taken, a deal offered, every review turn.
@@ -52,6 +52,9 @@ Rules of thumb:
 - **Your relationships are yours.** Keep a trust level in each dossier and let it move with deeds: kept promises, broken ones, help, slights. Loyalty, rivalry or betrayal are your decisions, made for your civilization's interest and your persona, never scripted.
 - **Act, don't only talk.** Back words with moves: research, builds, units, war and peace.
 - **Religion and civics are yours.** The built-in AI can't change them for you (the bridge undoes its attempts). Adopt a state religion with `civ religion <name>` and switch civics with `civ civics <civic>...`, paying the normal anarchy.
+- **Ongoing deals are yours to end.** `civ deals` lists open borders, pacts and resource trades with their age; `civ cancel <deal#|player>` ends one, like the game's own cancel (allowed 10 turns after signing; the other leader remembers it).
+- **The budget is yours.** `civ budget research 70 gold 30` sets the gold/research/culture/espionage split and it stays every turn (`civ budget auto` hands it back to the built-in AI). If your split would empty the treasury, the AI's split is used that turn (event `budget_suspended`).
+- **Conquered cities are yours.** A city your units take is kept (size-1 cities burn by the game's rule). To burn it instead: `civ raze <city>`, on that turn or the next.
 - **Deals are yours.** The built-in AI no longer makes deals, demands or wars for your civilization. Agree in chat, then make it real: `civ offer <player> --give ... --get ...` (the human answers on screen with !accept / !decline; an AI answers at once), `civ give` for gifts and kept promises, `civ war` to declare war. The game's rules decide what's tradeable (tech trading needs Alphabet). A promise in chat is only kept when the deal is actually done.
 
 ## Talking to the human
