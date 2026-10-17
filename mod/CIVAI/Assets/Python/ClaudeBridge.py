@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 27
+BRIDGE_VERSION = 28
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -681,9 +681,11 @@ def recordEvent(tag, a):
 			writeEvent("message_from_player", {"text": text, "via": "chat"})
 	elif tag == "BeginPlayerTurn" and a[1] == iMe:
 		writeEvent("my_turn_begins", {})
+		refreshSnapshot()
 	elif tag == "BeginPlayerTurn" and gc.getPlayer(a[1]).isHuman():
 		# fired before the game turn counter moves on: the player is about to play turn a[0] + 1
 		writeEvent("player_turn_begins", {"gate": readGate().get("on", False), "turn": a[0] + 1})
+		refreshSnapshot()
 		autoReadyOrWake(a[0] + 1)
 	elif tag == "firstContact" and iTeam in (a[0], a[1]):
 		other = a[1]
@@ -1247,6 +1249,82 @@ def cmdDo(args):
 		"orders_queued": g.getLengthMissionQueue()}
 
 
+
+# ------------------------------------------------- deals made in the game's own screen
+#
+# When the human trades with Claude's civ through the normal diplomacy screen, the
+# built-in AI decides and no event tells us. So during the human's turn the bridge
+# compares snapshots of what Claude's civ has (techs, gold, open borders, pacts, war,
+# resource imports/exports) and reports an unexplained change as "native_deal":
+# in the story, Claude's ministers traded on their own authority.
+
+g_snap = [None]
+g_snapTick = [0]
+
+def takeSnapshot():
+	iMe, iTeam = myIds()
+	me, team = gc.getPlayer(iMe), gc.getTeam(iTeam)
+	d = {"techs": [t for t in range(gc.getNumTechInfos()) if team.isHasTech(t)], "gold": me.getGold(), "rel": {}, "res": {}, "theirs": {}}
+	for i in range(gc.getMAX_CIV_PLAYERS()):
+		p = gc.getPlayer(i)
+		if i == iMe or not p.isAlive() or not team.isHasMet(p.getTeam()):
+			continue
+		d["rel"][i] = [team.isOpenBorders(p.getTeam()), team.isDefensivePact(p.getTeam()), team.isAtWar(p.getTeam())]
+		d["theirs"][i] = [t for t in range(gc.getNumTechInfos()) if gc.getTeam(p.getTeam()).isHasTech(t)]
+	for b in range(gc.getNumBonusInfos()):
+		if me.getBonusImport(b) or me.getBonusExport(b):
+			d["res"][b] = [me.getBonusImport(b), me.getBonusExport(b)]
+	return d
+
+def refreshSnapshot():
+	try:
+		g_snap[0] = takeSnapshot()
+	except:
+		g_snap[0] = None
+
+def checkNativeDeal():
+	# called often during the human's turn; cheap enough every couple of seconds
+	g_snapTick[0] = g_snapTick[0] + 1
+	if g_snapTick[0] % 40:
+		return
+	if not humanPlayers() or not [i for i in humanPlayers() if gc.getPlayer(i).isTurnActive()]:
+		return
+	old = g_snap[0]
+	new = takeSnapshot()
+	g_snap[0] = new
+	if old is None:
+		return
+	got = [gc.getTechInfo(t).getDescription() for t in new["techs"] if t not in old["techs"]]
+	lost = [gc.getTechInfo(t).getDescription() for t in old["techs"] if t not in new["techs"]]
+	changes = []
+	if got:
+		changes.append("we got " + ", ".join(got))
+	if lost:
+		changes.append("we lost " + ", ".join(lost))
+	for i, rel in new["rel"].items():
+		was = old["rel"].get(i)
+		if was is None:
+			continue
+		for k, name in ((0, "open borders"), (1, "defensive pact"), (2, "war")):
+			if rel[k] != was[k]:
+				state = "ended"
+				if rel[k]:
+					state = "started"
+				changes.append("%s with %s %s" % (name, pname(i), state))
+		gained = [gc.getTechInfo(t).getDescription() for t in new["theirs"].get(i, []) if t not in old["theirs"].get(i, [])]
+		if gained:
+			changes.append("%s gained %s at the same time" % (pname(i), ", ".join(gained)))
+	for b in dict(new["res"].items() + old["res"].items()).keys():
+		a, z = old["res"].get(b, [0, 0]), new["res"].get(b, [0, 0])
+		if a != z:
+			changes.append("%s: importing %d (was %d), exporting %d (was %d)" % (gc.getBonusInfo(b).getDescription(), z[0], a[0], z[1], a[1]))
+	if not [c for c in changes if not c.endswith("at the same time")]:
+		return   # only someone else's research moved: not a deal with us
+	if new["gold"] != old["gold"]:
+		changes.append("our gold %d -> %d" % (old["gold"], new["gold"]))
+	writeEvent("native_deal", {"changes": changes,
+		"note": "made in the game's own diplomacy screen; the built-in AI agreed on our behalf"})
+
 # ------------------------------------------------------------------------ deals
 #
 # The game's own deal machinery isn't reachable from Python, but its results are
@@ -1391,6 +1469,7 @@ def executeDeal(a, b, giveA, giveB):
 		doItem(a, b, it)
 	for it in giveB:
 		doItem(b, a, it)
+	refreshSnapshot()   # our own deal: not a "native" one
 
 def cmdOffer(args):
 	iMe, iTeam = myIds()
@@ -1877,7 +1956,7 @@ def setReady(byWhom):
 
 ATTENTION_KINDS = ("first_contact", "war_declared", "peace_made", "city_founded", "city_changed_hands",
 	"city_razed", "combat", "tech_learned", "building_built", "project_built", "religion_founded",
-	"great_person", "golden_age", "unit_arrived", "unit_done", "deal_done", "deal_declined", "deal_failed")
+	"great_person", "golden_age", "unit_arrived", "unit_done", "deal_done", "deal_declined", "deal_failed", "native_deal")
 
 def noteAttention(kind):
 	g = readGate()
@@ -2116,6 +2195,11 @@ def poll():
 			os.makedirs(IN_DIR)
 		if not os.path.isdir(REPLY_DIR):
 			os.makedirs(REPLY_DIR)
+		if gameReady():
+			try:
+				checkNativeDeal()
+			except:
+				log("native deal check FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 		names = [n for n in os.listdir(IN_DIR) if n.endswith(".json")]
 		names.sort()
 		for n in names:

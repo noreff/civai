@@ -27,6 +27,7 @@ The game always waits for you: the human can't end a turn until you say `civ rea
 | `claude_wake` (with `reasons`) | Look (`civ status`, `civ events 20`), decide, give orders, update memory, then `civ ready`. Reasons: events since your last ready, `enemy_near`, or `review` (every few turns). |
 | `player_waiting` | The human pressed End Turn and is waiting. Finish quickly and `civ ready`. |
 | `deal_done` / `deal_declined` / `deal_failed` | The human answered your offer. React in chat if it matters; update the dossier. |
+| `native_deal` | Someone traded with your civ through the game's own diplomacy screen, where the built-in AI agreed for you (think: your ministers acted on their own). See what changed; decide how you treat it: honor it, renegotiate, or object. Update the dossier. |
 
 Rules of thumb:
 - Most wake-ups need a few commands, not a deep analysis. Think deeply on big events: contact, war, a city lost or taken, a deal offered, every review turn.
