@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a ClaudeBridge state dump into a PNG map + a short text summary.
+"""Render a CIVAI state dump into a PNG map + a short text summary.
 
 Usage: render_map.py [state.json] [out_dir]
 Defaults: the latest dump in the civ4 CrossOver bottle -> out/ next to this script

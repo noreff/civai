@@ -18,7 +18,7 @@ import os
 import sys
 import traceback
 
-BRIDGE_SRC = "Mods\\ClaudeBridge\\Assets\\Python\\ClaudeBridge.py"
+BRIDGE_SRC = "Mods\\CIVAI\\Assets\\Python\\ClaudeBridge.py"
 POLL_EVERY_FRAMES = 4       # ~5 times a second at 20 fps
 RELOAD_CHECK_FRAMES = 40    # ~every 2 seconds
 HEARTBEAT_FRAMES = 1200     # ~every minute

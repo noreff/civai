@@ -14,7 +14,7 @@ The end goal is to record a game and publish it on YouTube.
 
 ## How it should feel (for the player)
 
-1. I start the game with the ClaudeBridge mod and say which civilization Claude plays.
+1. I start the game with the CIVAI mod and say which civilization Claude plays.
 2. I play my turn as usual. Meanwhile Claude looks around, thinks and gives orders.
 3. I press End Turn. If Claude isn't done yet, the game waits and shows "Brennus is still thinking...".
 4. I write to Claude's leader in the game chat (or in the terminal). The answer shows up in the game within seconds.
@@ -43,7 +43,7 @@ The end goal is to record a game and publish it on YouTube.
 
 | Layer | What | Why |
 |---|---|---|
-| Mod `ClaudeBridge` | Python inside the game | eyes and hands: the world with fog of war, orders, events |
+| Mod `CIVAI` (bridge code: `ClaudeBridge.py`) | Python inside the game | eyes and hands: the world with fog of war, orders, events |
 | Tool `civ` | terminal command | one way to talk to the game |
 | Skill `civ4-player` | instructions for Claude Code | how to play: turn loop, fairness, persona, chat, memory, BtS strategy |
 | Game folder `games/<id>/` | memory files | what is happening in this particular game |
@@ -108,7 +108,7 @@ The skill gets real content after stages 3 and 6, once there are real commands a
 - The pathfinder only knows revealed tiles: orders into the dark walk toward the closest known tile in that direction and re-plan each turn.
 - The player's turn-start event fires before the game turn counter moves on: label it `turn + 1`. `civ ready` targets the turn the human is playing or about to play.
 - The game's tech tree differs from memory (e.g. in BtS Alphabet needs Writing, which needs Priesthood / Animal Husbandry / Pottery): rules and costs must come from the game's XML / API, never from recollection.
-- The mod loads automatically (`Mod = Mods\ClaudeBridge` in `CivilizationIV.ini`), the game runs windowed at 1680×1050.
+- The mod loads automatically (`Mod = Mods\CIVAI` in `CivilizationIV.ini`), the game runs windowed at 1680×1050.
 
 ## Deliberately not doing
 - No playing through screenshots and clicks on the 3D map: screenshots are for the video only.
@@ -157,4 +157,3 @@ Each stage is a small piece: build → check together in the game → fix → mo
 3. Bug: first contact is logged twice (first as "an unknown civilization").
 4. Rule for the skill: take the tech tree and rules from the game's XML / API, not from memory.
 5. Skill `civ4-player` (stage 8).
-6. Rename the mod `ClaudeBridge` → CIVAI at the next game restart.

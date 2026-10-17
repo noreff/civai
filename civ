@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""civ - talk to the running Civ IV game through the ClaudeBridge mod mailbox.
+"""civ - talk to the running Civ IV game through the CIVAI mod mailbox.
 
   civ ping                 is the game there, whose turn is it
   civ status               compact digest of Claude's empire
@@ -72,7 +72,7 @@ def call(cmd, args=None, timeout=TIMEOUT):
         os.remove(os.path.join(IN_DIR, rid + ".json"))
     except FileNotFoundError:
         pass
-    raise BridgeError("game did not answer in %.0fs - is Civ IV running with the ClaudeBridge mod?" % timeout)
+    raise BridgeError("game did not answer in %.0fs - is Civ IV running with the CIVAI mod?" % timeout)
 
 
 def short(t):
@@ -151,7 +151,17 @@ OUT = os.path.join(HERE, "out")
 EVENTS = os.path.join(BRIDGE, "events.jsonl")
 CHAT = os.path.join(BRIDGE, "chat.jsonl")
 # video logs: every command and every thought, with wall-clock time, for overlays in the edit
-VIDEO_LOG_DIR = os.path.join(HERE, "games", os.environ.get("CIV_GAME", "celts-vs-spain"))
+def current_game():
+    # games/CURRENT holds the id of the game being played; CIV_GAME overrides it
+    try:
+        with open(os.path.join(HERE, "games", "CURRENT")) as f:
+            name = f.read().strip()
+    except FileNotFoundError:
+        name = "game"
+    return os.environ.get("CIV_GAME", name)
+
+
+VIDEO_LOG_DIR = os.path.join(HERE, "games", current_game())
 
 
 FIELD_ORDER = ["id", "name", "type", "civ", "leader", "owner", "human", "x", "y", "pop", "capital",
