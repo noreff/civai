@@ -71,6 +71,12 @@ Rules of thumb:
 
 A fresh session (or a different model) must be able to continue the game from these files alone.
 
+Keep the files tight — they are read on every wake-up, so their size is the cost of every wake-up:
+- `plan.md`: the current plan and open threads, about one page. Rewrite it rather than append; drop what's done or obsolete.
+- `chronicle.md`: older eras compressed to a few lines each; only recent turns in detail.
+- dossiers: a summary per player (who they are, trust, open promises both ways, last notable acts), not a diary.
+- When the brief says your memory is getting large, trim it on that wake-up.
+
 ## Cost
 
 - Be brief. Don't print big outputs you won't use; prefer `civ status`, `civ events N` with small N.

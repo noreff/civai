@@ -29,6 +29,7 @@ WAKE_KINDS = ("message_from_player", "claude_wake", "player_waiting", "deal_done
               "deal_failed", "native_deal")
 NOISE = ("auto_ready", "claude_ready", "my_turn_begins", "player_turn_begins", "combat_animal")
 MEMORY = ("persona.md", "ambitions.md", "plan.md", "secrets.md", "chronicle.md")
+MEMORY_TOKENS_WARN = 12000  # past this, the brief asks the agent to trim its memory files
 GATHER_SECONDS = 4          # a burst of events (chat + turn start...) becomes one wake-up
 
 
@@ -104,6 +105,11 @@ def prompt_for(d, events, chat, reasons):
     if os.path.exists(notes) and open(notes).read().strip():
         memory.append("### director_notes.md (from the CIVAI director: about tools and process only, never game info)\n\n"
                       + open(notes).read().strip())
+    size = sum(len(m) for m in memory) // 4
+    warn = ""
+    if size > MEMORY_TOKENS_WARN:
+        warn = ("\n\n**Your memory files are ~%d tokens (over %d). Trim them on this wake-up: rewrite plan.md to "
+                "about a page, compress old chronicle eras, keep dossiers as summaries.**" % (size, MEMORY_TOKENS_WARN))
     # fixed parts first (they stay cached between wake-ups), fresh parts last
     return "\n\n".join([
         "You are playing the current CIVAI game. This is ONE wake-up: act on it and finish. "
@@ -112,7 +118,7 @@ def prompt_for(d, events, chat, reasons):
         "skip its 'Start of a session' and 'Turn loop' listening steps: the loop wakes you.",
         "# PLAYBOOK\n\n" + playbook,
         "# YOUR MEMORY FILES (game folder: %s)\n\n" % d + "\n\n".join(memory),
-        "# BRIEF\n\n" + brief(events, chat, reasons),
+        "# BRIEF\n\n" + brief(events, chat, reasons) + warn,
     ])
 
 
