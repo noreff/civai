@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 35
+BRIDGE_VERSION = 36
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -486,7 +486,60 @@ def unitBrief(u, iTeam):
 		d["damage"] = u.getDamage()
 		d["moves"] = u.movesLeft()
 		d["max_moves"] = u.maxMoves()
+	else:
+		d.update(unitLooks(u))
 	return d
+
+def unitLooks(u):
+	# what a human sees hovering a unit: health bar, strength, promotions
+	d = {"health": "%d%%" % (100 * (u.maxHitPoints() - u.getDamage()) / max(1, u.maxHitPoints())),
+		"strength": "%g" % (u.baseCombatStr() * (u.maxHitPoints() - u.getDamage()) / float(max(1, u.maxHitPoints()))) + "/%d" % u.baseCombatStr()}
+	promos = [gc.getPromotionInfo(k).getDescription() for k in range(gc.getNumPromotionInfos()) if u.isHasPromotion(k)]
+	if promos:
+		d["promotions"] = promos
+	if u.getFortifyTurns() > 0:
+		d["fortified"] = True
+	return d
+
+def cmdOdds(args):
+	# the odds the game shows a human hovering an attack: our unit against the tile's best defender
+	iMe, iTeam = myIds()
+	me = gc.getPlayer(iMe)
+	x, y = int(args["x"]), int(args["y"])
+	pl = CyMap().plot(x, y)
+	if pl is None or pl.isNone() or not pl.isVisible(iTeam, False):
+		raise Exception("we can't see the tile %d,%d" % (x, y))
+	if args.get("id") is not None:
+		u = me.getUnit(int(args["id"]))
+		if u is None or u.isNone():
+			raise Exception("no unit of ours with id %s" % args["id"])
+		attackers = [u]
+	else:
+		attackers = []
+		(u, it) = me.firstUnit(False)
+		while u and not u.isNone():
+			if u.canAttack() and plotDistance(u.getX(), u.getY(), x, y) <= max(1, u.maxMoves() / gc.getMOVE_DENOMINATOR()):
+				attackers.append(u)
+			(u, it) = me.nextUnit(it, False)
+	out = []
+	for u in attackers:
+		dfd = pl.getBestDefender(-1, iMe, u, True, False, False)
+		row = {"unit": "#%d %s" % (u.getID(), gc.getUnitInfo(u.getUnitType()).getDescription()),
+			"from": "%d,%d" % (u.getX(), u.getY()),
+			"my_health": "%d%%" % (100 * (u.maxHitPoints() - u.getDamage()) / max(1, u.maxHitPoints()))}
+		if dfd is None or dfd.isNone():
+			row["defender"] = "none we can fight there"
+		else:
+			row["defender"] = "%s of %s" % (gc.getUnitInfo(dfd.getUnitType()).getDescription(), pname(dfd.getOwner()))
+			row["defender_looks"] = unitLooks(dfd)
+			row["win_odds"] = "%.1f%%" % (getCombatOdds(u, dfd) / 10.0)
+			if u.withdrawalProbability() > 0:
+				row["withdraw_chance"] = "%d%% (if it would lose)" % u.withdrawalProbability()
+			if u.collateralDamage() > 0:
+				row["collateral"] = "hits up to %d other units there" % u.collateralDamageMaxUnits()
+		out.append(row)
+	return {"target": "%d,%d" % (x, y), "attacks": out,
+		"note": "the same odds the game shows a human hovering the attack, from where each unit stands now"}
 
 def orderName(o):
 	t = int(o.eOrderType)
@@ -2797,6 +2850,7 @@ COMMANDS = {
 	"status": cmdStatus,
 	"map": cmdMap,
 	"tile": cmdTile,
+	"odds": cmdOdds,
 	"city": cmdCity,
 	"unit": cmdUnit,
 	"player": cmdPlayer,
