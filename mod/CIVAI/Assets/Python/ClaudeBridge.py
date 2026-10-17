@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 41
+BRIDGE_VERSION = 42
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -2137,9 +2137,9 @@ def parseItem(text):
 		return ("gold", int(arg))
 	if kind in ("open_borders", "defensive_pact", "peace"):
 		return (kind, -1)
-	if kind == "war":
-		return ("war", findPlayer(arg))
-	raise Exception("unknown deal item %s (tech:<name>, gold:<n>, open_borders, defensive_pact, peace, war:<player>)" % text)
+	if kind in ("war", "peace_with"):
+		return (kind, findPlayer(arg))
+	raise Exception("unknown deal item %s (tech:<name>, gold:<n>, open_borders, defensive_pact, peace, war:<player>, peace_with:<player>)" % text)
 
 def itemText(it):
 	kind, d = it
@@ -2149,16 +2149,19 @@ def itemText(it):
 		return "%d gold" % d
 	if kind == "war":
 		return "war on " + pname(d)
+	if kind == "peace_with":
+		return "peace with " + pname(d)
 	return kind.replace("_", " ")
 
 TRADE_TYPES = {"tech": "TRADE_TECHNOLOGIES", "gold": "TRADE_GOLD", "open_borders": "TRADE_OPEN_BORDERS",
-	"defensive_pact": "TRADE_DEFENSIVE_PACT", "peace": "TRADE_PEACE_TREATY", "war": "TRADE_WAR"}
+	"defensive_pact": "TRADE_DEFENSIVE_PACT", "peace": "TRADE_PEACE_TREATY", "war": "TRADE_WAR",
+	"peace_with": "TRADE_PEACE"}
 
 def tradeData(it):
 	kind, d = it
 	t = TradeData()
 	t.ItemType = getattr(TradeableItems, TRADE_TYPES[kind])
-	if kind == "war":
+	if kind in ("war", "peace_with"):
 		t.iData = gc.getPlayer(d).getTeam()
 	elif kind in ("tech", "gold"):
 		t.iData = d
@@ -2196,14 +2199,28 @@ def doItem(giver, taker, it):
 		gc.getTeam(g.getTeam()).makePeace(t.getTeam())
 	elif kind == "war":
 		gc.getTeam(g.getTeam()).declareWar(gc.getPlayer(d).getTeam(), True, WarPlanTypes.WARPLAN_DOGPILE)
+	elif kind == "peace_with":
+		gc.getTeam(g.getTeam()).makePeace(gc.getPlayer(d).getTeam())
 
-def itemValue(owner, it):
+def itemValue(owner, it, taker=-1):
 	kind, d = it
 	if kind == "tech":
 		return gc.getTeam(gc.getPlayer(owner).getTeam()).getResearchCost(d)
 	if kind == "gold":
 		return d
+	if kind == "peace_with" and taker >= 0:
+		return makePeaceTradeVal(d, taker)
 	return 0
+
+def makePeaceTradeVal(peace, taker):
+	# the game's CvTeamAI::AI_makePeaceTradeVal: what making peace with `peace` is worth to the AI
+	# when `taker` asks for it (dearer the more the two hate each other, cheaper the longer the war)
+	pe, ta = gc.getPlayer(peace), gc.getPlayer(taker)
+	v = 50 + gc.getGame().getGameTurn() + (gc.getTeam(ta.getTeam()).getNumCities() + gc.getTeam(pe.getTeam()).getNumCities()) * 8
+	att = (ta.AI_getAttitude(peace) + pe.AI_getAttitude(taker)) / 2
+	v = v * (100 + {0: 400, 1: 200, 2: 100, 3: 50}.get(att, 0)) / 100
+	v = v * 40 / (gc.getTeam(ta.getTeam()).AI_getAtWarCounter(pe.getTeam()) + 10)
+	return v - v % gc.getDefineINT("DIPLOMACY_VALUE_REMAINDER")
 
 def warDeclaredBy(a, b):
 	# which side declared the current war between teams a and b (from our own event log)
@@ -2257,7 +2274,7 @@ def aiAccepts(ai, me, give, get):
 		if den != DenialTypes.NO_DENIAL:
 			return False, "%s refuses to give %s (%s)" % (pname(ai), itemText(it), gc.getDenialInfo(den).getDescription())
 	vin = sum([itemValue(ai, it) for it in give])
-	vout = sum([itemValue(ai, it) for it in get])
+	vout = sum([itemValue(ai, it, me) for it in get])
 	if vout > vin * 1.1 + 10:
 		return False, "%s finds it unfair: gives about %d, gets about %d" % (pname(ai), vout, vin)
 	return True, "accepted"
@@ -2446,6 +2463,21 @@ def cmdTradeable(args):
 				out.append(k)
 		if gc.getTeam(pa.getTeam()).isAtWar(gc.getPlayer(b).getTeam()):
 			out.append("peace")
+		for k in ("war", "peace_with"):
+			for c in range(gc.getMAX_CIV_PLAYERS()):
+				if c in (a, b) or not gc.getPlayer(c).isAlive():
+					continue
+				try:
+					if not pa.canTradeItem(b, tradeData((k, c)), False):
+						continue
+				except:
+					continue
+				txt = "%s:%s" % (k, gc.getPlayer(c).getName())
+				if a != iMe and not pa.isHuman():   # our own side is our decision, not the AI's
+					den = pa.getTradeDenial(b, tradeData((k, c)))
+					if den != DenialTypes.NO_DENIAL:
+						txt += " (refuses: %s)" % gc.getDenialInfo(den).getDescription()
+				out.append(txt)
 		return out
 	d = {"with": pname(other), "we_can_give": side(iMe, other), "they_can_give": side(other, iMe)}
 	if not gc.getPlayer(other).isHuman():

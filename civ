@@ -20,8 +20,9 @@
                            it to the game's automation); a finished job wakes Claude (unit_done)
   civ offer <player> [--give ITEM...] [--get ITEM...]
                            propose a deal; items: tech:<name>, gold:<n>, open_borders,
-                           defensive_pact, peace, war:<player>. An AI answers at once (game's
-                           refusal rules + value); the human sees it on screen and types
+                           defensive_pact, peace, war:<player>, peace_with:<player> (make peace
+                           with a third leader). An AI answers at once (game's refusal rules
+                           + value); the human sees it on screen and types
                            !accept N / !decline N in chat (deal_done / deal_declined events)
   civ give <player> ITEM...  a gift (no answer needed), e.g. civ give India tech:Alphabet
   civ offers               open offers waiting for an answer
