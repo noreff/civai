@@ -1241,7 +1241,7 @@ def cmdArea(args):
 	d = {"map": rows, "cities": cities, "resources": bonuses, "foreign_units": foreign,
 		"owners": ["%s = %s" % (k, v) for k, v in owners.items()],
 		"legend": "each tile = 4 chars: terrain (g grass, p plains, d desert, t tundra, s snow, ~ coast, = ocean, ^ peak; "
-			"CAPITAL = hills), feature (f forest, j jungle, l flood plains, o oasis, i ice, . none), "
+			"an UPPERCASE letter = the same on hills, e.g. G = grassland hill), feature (f forest, j jungle, l flood plains, o oasis, i ice, . none), "
 			"what's on it (@ our city, # other city, u our unit, x foreign unit, * resource, : river, . nothing), "
 			"owner (. nobody, else player id, see owners). Blank = never seen. North is up: y grows to the NORTH, x grows to the EAST (a smaller y is south of you)."}
 	if args.get("sites", True):
