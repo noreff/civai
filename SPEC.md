@@ -119,6 +119,11 @@ Later CIVAI should run with an LLM of the user's choice, and several AIs should 
 - The game's tech tree differs from memory (e.g. in BtS Alphabet needs Writing, which needs Priesthood / Animal Husbandry / Pottery): rules and costs must come from the game's XML / API, never from recollection.
 - The mod loads automatically (`Mod = Mods\CIVAI` in `CivilizationIV.ini`), the game runs windowed at 1680×1050.
 
+## Known limits of a Python-only mod
+- Resource trades (ongoing per-turn deals) can't be created: Python can read bonus imports/exports but not change them, and CvDeal's trades aren't exposed. Needs a DLL change (compiling the SDK with the old MSVC toolchain).
+- The leader-screen diplomacy (animated leader) can't be opened from Python: deals with the human use the game's popup window instead.
+- When the human trades with the Claude civ through the native diplomacy screen, the built-in AI still decides (no Python hook for AI_considerOffer). Deals with the Claude civ should go through chat + `civ offer`.
+
 ## Deliberately not doing
 - No playing through screenshots and clicks on the 3D map: screenshots are for the video only.
 - No changes to the game's C++ core (until we hit a wall).
