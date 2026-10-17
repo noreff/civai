@@ -16,6 +16,7 @@ Each wake-up is logged for the video in games/<id>/wakes/.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -133,10 +134,14 @@ def handle(cfg, d, st, events, chat, reasons):
     gid = os.path.basename(d)
     turn = next((e.get("turn") for e in reversed(events) if e.get("turn") is not None), "?")
     cmds_path, thoughts_path = os.path.join(d, "commands.jsonl"), os.path.join(d, "thoughts.jsonl")
+    prompt = prompt_for(d, events, chat, reasons)   # the loop's own lookups happen here, before the marks
+    m = re.search(r"Turn (\d+),", prompt)
+    if m:
+        turn = m.group(1)
     cmds_pos = os.path.getsize(cmds_path) if os.path.exists(cmds_path) else 0
     th_pos = os.path.getsize(thoughts_path) if os.path.exists(thoughts_path) else 0
-    prompt = prompt_for(d, events, chat, reasons)
     out, secs = run_agent(cfg, prompt)
+    agent_cmds = lines_since(cmds_path, cmds_pos)
     # the human must never be stuck: if the agent forgot `civ ready` on a turn wake-up, say it for it
     gate = civ("gate")
     forced = False
@@ -149,7 +154,7 @@ def handle(cfg, d, st, events, chat, reasons):
            "**Thoughts:**", ""]
     log += ["- " + t.get("text", "") for t in lines_since(thoughts_path, th_pos)] or ["- (none)"]
     log += ["", "**Commands:**", ""]
-    log += ["- `civ %s`" % c.get("cmd", "") for c in lines_since(cmds_path, cmds_pos)] or ["- (none)"]
+    log += ["- `civ %s`" % c.get("cmd", "") for c in agent_cmds] or ["- (none)"]
     log += ["", "**Final words:**", "", out[-3000:], "",
             "_%.0f s, prompt ~%d tokens%s_" % (secs, len(prompt) // 4, ", ready said by the loop" if forced else "")]
     name = "T%s-%s.md" % (str(turn).zfill(3), time.strftime("%H%M%S"))
