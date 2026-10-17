@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 23
+BRIDGE_VERSION = 24
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -717,10 +717,13 @@ def recordEvent(tag, a):
 				"loser": pname(lose.getOwner()), "loser_unit": gc.getUnitInfo(lose.getUnitType()).getType(),
 				"x": lose.getX(), "y": lose.getY()})
 	elif tag == "unitBuilt" and a[0].getOwner() == iMe:
+		cityItemDone(a[0], OrderTypes.ORDER_TRAIN, a[1].getUnitType())
 		writeEvent("unit_built", {"city": a[0].getName(), "unit": gc.getUnitInfo(a[1].getUnitType()).getType(),
 			"id": a[1].getID()})
 	elif tag == "buildingBuilt":
 		c, b = a[0], a[1]
+		if c.getOwner() == iMe:
+			cityItemDone(c, OrderTypes.ORDER_CONSTRUCT, b)
 		info = gc.getBuildingInfo(b)
 		if c.getOwner() == iMe or isWorldWonderClass(info.getBuildingClassType()):
 			writeEvent("building_built", {"city": c.getName(), "owner": pname(c.getOwner()), "building": info.getType()})
@@ -1544,20 +1547,38 @@ def cmdResearch(args):
 	return researchState(p)
 
 def loadCityClaims():
+	# {"owner:cityID": [[orderType, data], ...]} -- Claude's queue for each city it manages
 	if not os.path.exists(CITY_CLAIMS_FILE):
-		return []
+		return {}
 	f = open(CITY_CLAIMS_FILE, "rb")
 	try:
-		return fromJson(f.read()) or []
+		d = fromJson(f.read()) or {}
 	finally:
 		f.close()
+	if isinstance(d, list):   # older format: just the keys
+		d = dict([(k, []) for k in d])
+	return d
+
+def saveCityClaims(d):
+	writeAtomic(CITY_CLAIMS_FILE, toJson(d))
+
+def cityKey(c):
+	return "%d:%d" % (c.getOwner(), c.getID())
 
 def claimCity(c):
-	ids = loadCityClaims()
-	key = "%d:%d" % (c.getOwner(), c.getID())
-	if key not in ids:
-		ids.append(key)
-		writeAtomic(CITY_CLAIMS_FILE, toJson(ids))
+	# remember the city's whole queue as Claude set it
+	d = loadCityClaims()
+	d[cityKey(c)] = [[int(c.getOrderFromQueue(k).eOrderType), c.getOrderFromQueue(k).iData1]
+		for k in range(c.getOrderQueueLength())]
+	saveCityClaims(d)
+
+def cityItemDone(c, order, data):
+	# an item finished: drop it from the remembered queue
+	d = loadCityClaims()
+	q = d.get(cityKey(c))
+	if q and q[0][0] == int(order) and q[0][1] == data:
+		q.pop(0)
+		saveCityClaims(d)
 
 def findItem(want):
 	# a unit, building, project or process for a city's queue
@@ -1603,9 +1624,16 @@ def cmdBuild(args):
 		"turns": c.getProductionTurnsLeft()}
 
 def aiChooseProduction(gu, argsList):
+	# the game clears a city's queue before asking us, so we put Claude's remaining
+	# items back; only when Claude's queue is used up does the built-in AI choose
 	c = argsList[0]
-	if c.getOrderQueueLength() > 0 and ("%d:%d" % (c.getOwner(), c.getID())) in loadCityClaims():
-		return True   # keep our queue; the built-in AI chooses only when it runs empty
+	q = loadCityClaims().get(cityKey(c))
+	if q:
+		if c.getOrderQueueLength() == 0:
+			for (order, data) in q:
+				c.pushOrder(OrderTypes(order), data, -1, False, False, True, False)
+		if c.getOrderQueueLength() > 0:
+			return True
 	return gu._claudeOrigChooseProduction(argsList)
 
 def chooseProductionTrampoline(argsList):
