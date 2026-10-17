@@ -29,6 +29,7 @@ WAKE_KINDS = ("message_from_player", "claude_wake", "player_waiting", "deal_done
               "deal_failed", "native_deal")
 NOISE = ("auto_ready", "claude_ready", "my_turn_begins", "player_turn_begins", "combat_animal")
 MEMORY = ("persona.md", "ambitions.md", "plan.md", "secrets.md", "chronicle.md")
+CHAT_LINES = 15             # recent chat shown on every wake-up, new lines marked
 MEMORY_TOKENS_WARN = 12000  # past this, the brief asks the agent to trim its memory files
 GATHER_SECONDS = 4          # a burst of events (chat + turn start...) becomes one wake-up
 
@@ -85,8 +86,11 @@ def brief(events, chat, reasons):
              "## Since your last wake-up", ""]
     shown = [fmt_event(e) for e in events if e.get("kind") not in NOISE]
     parts += shown[-40:] or ["(no game events)"]
-    parts += ["", "## Chat since your last wake-up", ""]
-    parts += ["T%s %s: %s" % (c.get("turn"), c.get("from"), c.get("text")) for c in chat[-20:]] or ["(none)"]
+    parts += ["", "## Chat (the last %d lines; NEW = since your last wake-up)" % CHAT_LINES, ""]
+    new_ids = set(json.dumps(c, sort_keys=True) for c in chat)
+    recent, _ = read_from(CHAT, 0)
+    parts += ["%sT%s %s: %s" % ("NEW " if json.dumps(c, sort_keys=True) in new_ids else "    ", c.get("turn"),
+              "you" if c.get("from") == "claude" else "the human", c.get("text")) for c in recent[-CHAT_LINES:]] or ["(none)"]
     parts += ["", "## Your last wake-ups (what you did)", ""]
     parts += recent_wakes(3) or ["(none)"]
     parts += ["", "## State now", "", civ("status"), "", civ("research"), "", civ("offers"), "", civ("gate")]
