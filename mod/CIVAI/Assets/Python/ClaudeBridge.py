@@ -15,7 +15,7 @@ import traceback
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 19
+BRIDGE_VERSION = 20
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -981,6 +981,119 @@ def cmdSay(args):
 	return {"shown": True}
 
 
+
+# ------------------------------------------------------------------ area map
+#
+# A compact text map of a region, limited to what our civ has seen, plus the best
+# city sites there (the game's own site rating, only for sites we have mostly seen).
+
+TERRAIN_CH = {"TERRAIN_GRASS": "g", "TERRAIN_PLAINS": "p", "TERRAIN_DESERT": "d", "TERRAIN_TUNDRA": "t",
+	"TERRAIN_SNOW": "s", "TERRAIN_COAST": "~", "TERRAIN_OCEAN": "=", "TERRAIN_PEAK": "^", "TERRAIN_HILL": "h"}
+FEATURE_CH = {"FEATURE_FOREST": "f", "FEATURE_JUNGLE": "j", "FEATURE_FLOOD_PLAINS": "l", "FEATURE_OASIS": "o",
+	"FEATURE_ICE": "i", "FEATURE_FALLOUT": "x"}
+
+def ownerCh(o):
+	if o < 0:
+		return "."
+	return "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"[o % 36]
+
+def areaCell(pl, iMe, iTeam):
+	if not pl.isRevealed(iTeam, False):
+		return "    "
+	t = gc.getTerrainInfo(pl.getTerrainType()).getType()
+	if pl.isPeak():
+		c1 = "^"
+	else:
+		c1 = TERRAIN_CH.get(t, "?")
+		if pl.isHills():
+			c1 = c1.upper()
+	f = pl.getFeatureType()
+	c2 = "."
+	if f >= 0:
+		c2 = FEATURE_CH.get(gc.getFeatureInfo(f).getType(), "?")
+	c3 = "."
+	if pl.isCity():
+		c3 = "#"
+		if pl.getPlotCity().getOwner() == iMe:
+			c3 = "@"
+	else:
+		units = []
+		if pl.isVisible(iTeam, False):
+			units = [pl.getUnit(k) for k in range(pl.getNumUnits())]
+			units = [u for u in units if not u.isInvisible(iTeam, False)]
+		if [u for u in units if u.getOwner() != iMe]:
+			c3 = "x"
+		elif units:
+			c3 = "u"
+		elif pl.getBonusType(iTeam) >= 0:
+			c3 = "*"
+		elif pl.isRiver():
+			c3 = ":"
+	return c1 + c2 + c3 + ownerCh(pl.getRevealedOwner(iTeam, False))
+
+def cmdArea(args):
+	iMe, iTeam = myIds()
+	me = gc.getPlayer(iMe)
+	m = CyMap()
+	cx, cy, r = int(args["x"]), int(args["y"]), int(args.get("r", 6))
+	rows = ["     " + "".join(["%-4d" % ((cx + dx) % m.getGridWidth()) for dx in range(-r, r + 1)])]
+	cities, bonuses, foreign, owners = [], [], [], {}
+	for dy in range(r, -r - 1, -1):          # north at the top
+		line = []
+		for dx in range(-r, r + 1):
+			pl = m.plot(cx + dx, cy + dy)
+			if pl is None or pl.isNone():
+				line.append("    ")
+				continue
+			line.append(areaCell(pl, iMe, iTeam))
+			if not pl.isRevealed(iTeam, False):
+				continue
+			o = pl.getRevealedOwner(iTeam, False)
+			if o >= 0:
+				owners[ownerCh(o)] = pname(o)
+			if pl.isCity():
+				c = pl.getPlotCity()
+				cities.append("%s (%d,%d) %s" % (c.getName(), pl.getX(), pl.getY(), pname(c.getOwner())))
+			b = pl.getBonusType(iTeam)
+			if b >= 0:
+				bonuses.append("%s (%d,%d)" % (gc.getBonusInfo(b).getDescription(), pl.getX(), pl.getY()))
+			if pl.isVisible(iTeam, False):
+				for k in range(pl.getNumUnits()):
+					u = pl.getUnit(k)
+					if u.getOwner() != iMe and not u.isInvisible(iTeam, False):
+						foreign.append("%s of %s (%d,%d)" % (gc.getUnitInfo(u.getUnitType()).getDescription(),
+							pname(u.getOwner()), pl.getX(), pl.getY()))
+		rows.append("%4d " % (cy + dy) + "".join(line))
+	d = {"map": rows, "cities": cities, "resources": bonuses, "foreign_units": foreign,
+		"owners": ["%s = %s" % (k, v) for k, v in owners.items()],
+		"legend": "each tile = 4 chars: terrain (g grass, p plains, d desert, t tundra, s snow, ~ coast, = ocean, ^ peak; "
+			"CAPITAL = hills), feature (f forest, j jungle, l flood plains, o oasis, i ice, . none), "
+			"what's on it (@ our city, # other city, u our unit, x foreign unit, * resource, : river, . nothing), "
+			"owner (. nobody, else player id, see owners). Blank = never seen. North is up."}
+	if args.get("sites", True):
+		sites = []
+		for dy in range(-r, r + 1):
+			for dx in range(-r, r + 1):
+				pl = m.plot(cx + dx, cy + dy)
+				if pl is None or pl.isNone() or not pl.isRevealed(iTeam, False) or pl.isWater():
+					continue
+				if not me.canFound(pl.getX(), pl.getY()):
+					continue
+				seen = 0
+				for i in range(21):
+					q = plotCity(pl.getX(), pl.getY(), i)
+					if q and not q.isNone() and q.isRevealed(iTeam, False):
+						seen += 1
+				if seen < 15:
+					continue
+				v = me.AI_foundValue(pl.getX(), pl.getY(), -1, False)
+				if v > 0:
+					sites.append((v, pl.getX(), pl.getY(), seen))
+		sites.sort()
+		sites.reverse()
+		d["best_city_sites"] = ["(%d,%d) value %d, %d/21 tiles seen" % (x, y, v, n) for (v, x, y, n) in sites[:5]]
+	return d
+
 # ------------------------------------------------------- orders: research, builds
 #
 # The player's own decisions, checked by the game's rules (canResearch, canTrain...)
@@ -1318,6 +1431,7 @@ COMMANDS = {
 	"exec": cmdExec,
 	"move": cmdMove,
 	"research": cmdResearch,
+	"area": cmdArea,
 	"build": cmdBuild,
 	"ping": cmdPing,
 	"status": cmdStatus,

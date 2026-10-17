@@ -9,6 +9,8 @@
   civ unit <id>            one of my units
   civ player <name|civ|id> a player I have met
   civ move <id> X Y        walk a unit to X Y (several turns if needed); the unit becomes Claude's
+  civ area X Y [R]         text map of the region around X Y (radius R, default 6) with cities,
+                           resources, foreign units, borders, and the best city sites there
   civ research [tech] [--queue]
                            no tech: what we research, the queue, what we can research (turns);
                            tech: research it now (missing prerequisites are queued first);
@@ -312,6 +314,17 @@ def main(argv):
             print(call("exec", {"code": " ".join(argv[1:]) if len(argv) > 1 else sys.stdin.read()})["value"])
         elif cmd == "ready":
             print(fmt_record(call("ready")))
+        elif cmd == "area":
+            xy = " ".join(argv[1:]).replace(",", " ").split()
+            args = {"x": int(xy[0]), "y": int(xy[1])}
+            if len(xy) > 2:
+                args["r"] = int(xy[2])
+            r = call("area", args)
+            print("\n".join(r["map"]))
+            print("legend: " + r["legend"])
+            for k in ("owners", "cities", "resources", "foreign_units", "best_city_sites"):
+                if r.get(k):
+                    print("%s: %s" % (k.replace("_", " "), "; ".join(r[k])))
         elif cmd == "research":
             words = [a for a in argv[1:] if not a.startswith("--")]
             args = {"tech": " ".join(words), "queue": "--queue" in argv} if words else {}

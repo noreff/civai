@@ -6,7 +6,7 @@ You play one civilization in Civilization IV: Beyond the Sword, like a live huma
 
 1. `cat ~/civai/games/CURRENT` — the game id. The game folder is `~/civai/games/<id>/`.
 2. Read the game folder: `persona.md` (who you are), `ambitions.md`, `plan.md`, `dossiers/*.md`, `secrets.md` and `chronicle.md` if they exist.
-3. Catch up: `civ status`, `civ chat 20`, `civ events 40`.
+3. Catch up: `civ status`, `civ chat 20`, `civ events 40`, and `civ area X Y` around your capital to see the land.
 4. Start listening for wake-ups (see "Turn loop"). Then wait.
 
 The `civ` tool is `~/civai/civ`. `civ help` lists every command. Start a game session with `~/civai/play.sh` (small context, only the tools the game needs).
@@ -32,6 +32,7 @@ The game always waits for you: the human can't end a turn until you say `civ rea
 
 Rules of thumb:
 - Most wake-ups need a few commands, not a deep analysis. Think deeply on big events: contact, war, a city lost or taken, a deal offered, every review turn.
+- Look at the land before land decisions (claims, city sites, borders, wars): `civ area X Y [R]` is a text map with resources, borders, foreign units and the best city sites the game rates. One look beats many `civ tile` calls.
 - The built-in AI runs everything you don't take over. Take over what matters: research, key builds, units with a purpose (`civ move` / `civ claim`), war and peace.
 - Keep promises. If you can't, say so in chat before breaking them.
 
