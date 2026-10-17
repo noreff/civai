@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 37
+BRIDGE_VERSION = 38
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -603,7 +603,14 @@ def cmdCity(args):
 	c = findCity(args)
 	d = {"name": c.getName(), "owner": c.getOwner(), "x": c.getX(), "y": c.getY()}
 	pl = c.plot()
+	d["ground"] = "%s%s" % (gc.getTerrainInfo(pl.getTerrainType()).getDescription(),
+		{0: " peak", 1: " hills", 2: " flat", 3: " water"}.get(int(pl.getPlotType()), ""))
+	if pl.isRiver():
+		d["ground"] += ", by a river"
 	if c.getOwner() != iMe:
+		d["in_sight_now"] = pl.isVisible(iTeam, False)
+		if not d["in_sight_now"]:
+			d["note"] = "out of sight: no unit of ours sees it now, so its garrison and defense are unknown"
 		if pl.isVisible(iTeam, False):
 			d["pop"] = c.getPopulation()
 			d["defense_percent"] = c.getDefenseModifier(False)
