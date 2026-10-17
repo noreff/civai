@@ -122,7 +122,8 @@ Later CIVAI should run with an LLM of the user's choice, and several AIs should 
 ## Known limits of a Python-only mod
 - Resource trades (ongoing per-turn deals) can't be created: Python can read bonus imports/exports but not change them, and CvDeal's trades aren't exposed. Needs a DLL change (compiling the SDK with the old MSVC toolchain).
 - The leader-screen diplomacy (animated leader) can't be opened from Python: deals with the human use the game's popup window instead.
-- When the human trades with the Claude civ through the native diplomacy screen, the built-in AI still decides (no Python hook for AI_considerOffer). Deals with the Claude civ should go through chat + `civ offer`.
+- When the human trades with the Claude civ through the native diplomacy screen, the built-in AI still decides (no Python hook for AI_considerOffer). Deals with the Claude civ should go through chat + `civ offer`. The same holds for deals other AIs propose to the Claude civ during their turns: they can't be stopped, so the bridge compares snapshots at every turn hand-over, reports them (`native_deal`, with whose turn) and `civ cancel` ends ongoing ones under the game's rules (v31).
+- Decisions the built-in AI no longer makes for the Claude civ (v31): the commerce split (`civ budget`, re-applied in the doGold hook, after AI_doCommerce), razing captured cities (canRazeCity hook keeps them; `civ raze` within a turn).
 
 ## Deliberately not doing
 - No playing through screenshots and clicks on the 3D map: screenshots are for the video only.
