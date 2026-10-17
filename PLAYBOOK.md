@@ -9,7 +9,7 @@ You play one civilization in Civilization IV: Beyond the Sword, like a live huma
 3. Catch up: `civ status`, `civ chat 20`, `civ events 40`.
 4. Start listening for wake-ups (see "Turn loop"). Then wait.
 
-The `civ` tool is `~/civai/civ`. `civ help` lists every command.
+The `civ` tool is `~/civai/civ`. `civ help` lists every command. Start a game session with `~/civai/play.sh` (small context, only the tools the game needs).
 
 ## Fair play (never break this)
 
