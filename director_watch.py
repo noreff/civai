@@ -104,6 +104,11 @@ def main():
     me = my_player()
     say("director watch started (agent plays player %s, stuck after %ds)" % (me, STUCK))
     ev, ex, bl = follow(EVENTS), follow(EXEC_LOG), follow(BRIDGE_LOG)
+    try:
+        gid = open(os.path.expanduser("~/civai/games/CURRENT")).read().strip()
+        lp = follow(os.path.expanduser("~/civai/games/%s/loop.log" % gid))
+    except Exception:
+        lp = iter(lambda: None, 1)
     pending = None          # (kind, turn, since) of an unanswered wake-up
     warned = False
     block = []
@@ -140,6 +145,10 @@ def main():
             busy = True
             if "FAILED" in line or "Traceback" in line:
                 say("BRIDGE ERROR: " + line.strip()[:300])
+        for line in iter(lambda: next(lp), None):
+            busy = True
+            if "Traceback" in line or "timed out" in line or "forced ready" in line or "Error" in line:
+                say("LOOP: " + line.strip()[:300])
         if pending and not warned and time.time() - pending[2] > STUCK:
             say("STUCK: %s on turn %s unanswered for %d min" % (pending[0], pending[1], STUCK // 60))
             warned = True
