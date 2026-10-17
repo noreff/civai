@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 36
+BRIDGE_VERSION = 37
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -2079,16 +2079,57 @@ def itemValue(owner, it):
 		return d
 	return 0
 
+def warDeclaredBy(a, b):
+	# which side declared the current war between teams a and b (from our own event log)
+	names = (gc.getTeam(a).getName(), gc.getTeam(b).getName())
+	who = None
+	try:
+		for line in open(EVENTS_FILE):
+			if '"war_declared"' not in line:
+				continue
+			try:
+				e = fromJson(line)
+			except:
+				continue
+			if e.get("team") in names and e.get("against") in names:
+				who = e.get("team")
+	except:
+		pass
+	if who == names[0]:
+		return a
+	if who == names[1]:
+		return b
+	return -1
+
+def aiWillingToTalk(ai, me):
+	# the game's CvPlayerAI::AI_isWillingToTalk: whether the AI opens the diplomacy screen at all
+	p = gc.getPlayer(ai)
+	t, o = p.getTeam(), gc.getPlayer(me).getTeam()
+	team = gc.getTeam(t)
+	if team.isAtWar(o):
+		dur = gc.getLeaderHeadInfo(p.getPersonalityType()).getRefuseToTalkWarThreshold()
+		if warDeclaredBy(t, o) == t:
+			dur *= 2          # a war they chose themselves
+		ours = 1 + team.AI_getWarSuccess(o)
+		theirs = 1 + gc.getTeam(o).AI_getWarSuccess(t)
+		if theirs > ours * 2:
+			dur = dur * (20 + (80 * ours * 2) / theirs) / 100
+		if team.AI_getAtWarCounter(o) < dur or team.isAVassal():
+			return False
+	elif p.AI_getMemoryCount(me, MemoryTypes.MEMORY_STOPPED_TRADING_RECENT) > 0:
+		return False
+	return True
+
 def aiAccepts(ai, me, give, get):
-	# give = what Claude gives the AI, get = what the AI gives Claude
+	# give = what Claude gives the AI, get = what the AI gives Claude; follows the game's
+	# CvPlayerAI::AI_considerOffer: refusals by item (getTradeDenial), then value
 	p = gc.getPlayer(ai)
 	for it in get:
+		if it[0] == "peace":
+			continue      # the game has no refusal for a peace treaty itself
 		den = p.getTradeDenial(me, tradeData(it))
-		if den != DenialTypes.NO_DENIAL and it[0] != "peace":
+		if den != DenialTypes.NO_DENIAL:
 			return False, "%s refuses to give %s (%s)" % (pname(ai), itemText(it), gc.getDenialInfo(den).getDescription())
-	att = p.AI_getAttitude(me)
-	if get and att <= AttitudeTypes.ATTITUDE_ANNOYED:
-		return False, "%s is %s toward us and won't deal" % (pname(ai), gc.getAttitudeInfo(att).getDescription())
 	vin = sum([itemValue(ai, it) for it in give])
 	vout = sum([itemValue(ai, it) for it in get])
 	if vout > vin * 1.1 + 10:
@@ -2121,6 +2162,12 @@ def cmdOffer(args):
 		checkItem(iMe, other, it)
 	for it in get:
 		checkItem(other, iMe, it)
+	if not gc.getPlayer(other).isHuman() and not aiWillingToTalk(other, iMe):
+		why = "%s refuses to talk to us for now (the game's diplomacy screen stays closed); try again in a later turn" % pname(other)
+		if gc.getTeam(iTeam).isAtWar(gc.getPlayer(other).getTeam()):
+			why += ". At war, a leader refuses to talk for a while after the war begins; war success shortens it"
+		writeEvent("deal_refused", {"with": pname(other), "why": why})
+		return {"done": False, "why": why}
 	if not get:
 		# a gift needs no answer
 		executeDeal(iMe, other, give, [])
