@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 136
+BRIDGE_VERSION = 137
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1975,6 +1975,8 @@ def actionName(a):
 		t = gc.getMissionInfo(m).getType()
 		if t == "MISSION_BUILD":
 			return gc.getBuildInfo(a.getMissionData()).getType()
+		if t == "MISSION_SPREAD" and a.getMissionData() >= 0:
+			return "SPREAD_" + gc.getReligionInfo(a.getMissionData()).getType()[len("RELIGION_"):]
 		return t[len("MISSION_"):]
 	if c >= 0:
 		t = gc.getCommandInfo(c).getType()[len("COMMAND_"):]
@@ -2204,6 +2206,10 @@ def cmdDo(args):
 		return doSpyMission(u, (want + " " + (args.get("target") or "")).strip())
 	acts = unitActions(u)
 	want = ACTION_WORDS.get(want, want)
+	if want in ("SPREAD", "SPREAD_RELIGION"):
+		spreads = [n for (n, a, t) in acts if n.startswith("SPREAD_")]
+		if len(spreads) == 1:
+			want = spreads[0]   # the one faith this unit carries
 	if want in ("FORTIFY", "SLEEP", "SENTRY") and "WAKE" in [n for (n, a, t) in acts]:
 		# already fortified or asleep: the order is already in effect
 		return {"id": u.getID(), "already": "the unit is already fortified or asleep (WAKE to wake it)"}
