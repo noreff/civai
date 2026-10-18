@@ -833,7 +833,8 @@ def handle(cfg, d, st, events, chat, reasons):
     if cfg.get("shadow"):
         shadow_run(cfg, d, events, chat, reasons)
     v2 = cfg.get("prompt") == "v2"
-    kind = wake_kind(d, events, reasons, st, game_turn(), cfg)
+    start_turn = game_turn()   # the turn this wake-up is for (the game may move on while it runs)
+    kind = wake_kind(d, events, reasons, st, start_turn, cfg)
     if v2:
         system, prompt = prompt_v2(d, events, chat, reasons, kind=kind)   # the loop's own lookups happen here, before the marks
         with open(SYSTEM_FILE_V2, "w") as f:
@@ -858,7 +859,7 @@ def handle(cfg, d, st, events, chat, reasons):
     meta["kind"] = kind
     st["last_kind"] = kind
     if not error and any(r.startswith(("turn ", "player_waiting")) for r in reasons):
-        st["turn_woken"] = game_turn()
+        st["turn_woken"] = start_turn
     if kind == "council" and not error:
         st["last_council"] = game_turn()
     if kind == "audience":
@@ -882,8 +883,10 @@ def handle(cfg, d, st, events, chat, reasons):
     # the human must never be stuck: if the agent forgot `civ ready` on a turn wake-up, say it for it
     gate = civ("gate")
     forced = False
+    # only for the turn this wake-up was for: if the agent said ready and the game moved on, the next turn is not ours to end
+    same_turn = re.search(r"^turn:\s+%s\s*$" % start_turn, gate, re.M) is not None
     if (any(r.startswith(("turn ", "player_waiting")) for r in reasons) or "claude_wake" in " ".join(reasons)) \
-            and "ready:           no" in gate and not error:
+            and "ready:           no" in gate and not error and same_turn:
         civ("ready")
         forced = True
     st["wakes"] = st.get("wakes", 0) + 1
