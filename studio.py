@@ -205,9 +205,20 @@ def moment(e):
     if k == "religion_founded" and e.get("by") != "an unknown civilization":
         return ("religion:%s" % e.get("religion"), "religion", "%s founds %s" % (e.get("by"), nice(e.get("religion"))),
                 ("leader", e.get("by")))
+    if k == "proposal" and "Diplomatic Victory" in (e.get("text") or "") and "Requires" in (e.get("text") or ""):
+        # the United Nations (or the Apostolic Palace) puts a diplomatic victory to the vote
+        return ("dvote:%s" % e.get("turn"), "vote", "The world votes: a diplomatic victory is on the table", None)
     if k == "first_contact":
         return None
     return None
+
+
+def winner():
+    out = civ("py", "import ClaudeBridge as B\ng = gc.getGame()\nw = g.getWinner()\n"
+                    "result = w >= 0 and '%s|%s' % (B.realName(gc.getTeam(w).getLeaderID()), "
+                    "gc.getVictoryInfo(g.getVictory()).getDescription()) or ''")
+    m = re.search(r"'([^'|]+)\|([^']+)'", out)
+    return m and (m.group(1), m.group(2))
 
 
 def follow():
@@ -265,6 +276,7 @@ def main():
     buffer = replay_buffer_on()
     pos = follow()
     seen, alive, last_overview = set(), {}, None
+    won, won_check = False, 0
     say("studio on %s: %d wonders known, replay buffer %s" % (GAME, len(WONDERS), buffer and "on" or "off"))
     while True:
         todo = []
@@ -278,6 +290,12 @@ def main():
             if alive.get(name) and not a:
                 todo.append((("elim:%s" % name, "eliminated", "%s is eliminated" % name, None), turn))
         alive.update(now_alive)
+        if time.time() - won_check > 15 and not won:
+            won_check = time.time()
+            w = winner()
+            if w:
+                won = True
+                todo.append((("win", "victory", "%s wins: %s victory" % w, ("leader", w[0])), turn))
         if isinstance(turn, int) and turn % OVERVIEW_EVERY == 0 and turn != last_overview:
             last_overview = turn
             record("overview", turn, "the map at turn %d" % turn, {"shot": shot("T%03d-overview" % turn)})
