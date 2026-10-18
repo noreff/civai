@@ -373,44 +373,126 @@ def prompt_v2(d, events, chat, reasons, rec_dir=None):
     return system, "\n\n".join(parts)
 
 
-def run_agent(cfg, prompt, resume=None, system_file=SYSTEM_FILE, extra_env=None):
-    cmd = [a.replace("{prompt}", prompt) for a in cfg["agent"]]
+CODEX_HOME = os.path.join(HERE, "out", "codex-home")   # a clean Codex config: the login only, no skills, MCP or memory
+
+
+def codex_home():
+    # the user's ChatGPT login is linked, never copied; everything else is empty so every seat starts equal
+    os.makedirs(CODEX_HOME, exist_ok=True)
+    link = os.path.join(CODEX_HOME, "auth.json")
+    if not os.path.lexists(link):
+        os.symlink(os.path.expanduser("~/.codex/auth.json"), link)
+    conf = os.path.join(CODEX_HOME, "config.toml")
+    if not os.path.exists(conf):
+        open(conf, "w").write("# CIVAI seat: no MCP servers, no project docs\nproject_doc_max_bytes = 0\n")
+    return CODEX_HOME
+
+
+def harness_of(cfg):
+    return cfg.get("harness") or ("claude" if os.path.basename(cfg["agent"][0]) == "claude" else "other")
+
+
+def agent_command(cfg, system_file, resume):
+    """The command line for one call. Every harness gets our text as its whole system prompt, the same
+    four tools (shell, read, write, edit) and the prompt on stdin."""
+    h = harness_of(cfg)
+    if h == "codex":
+        cmd = ["codex", "exec"] + (["resume", resume] if resume else []) + [
+            "--skip-git-repo-check", "--json", "--dangerously-bypass-approvals-and-sandbox",
+            "-c", "model_instructions_file=" + system_file]
+        if cfg.get("model"):
+            cmd += ["-m", cfg["model"]]
+        if cfg.get("effort"):
+            cmd += ["-c", "model_reasoning_effort=" + cfg["effort"]]
+        return cmd + ["-"], {"CODEX_HOME": codex_home()}
+    if h == "pi":
+        cmd = ["pi", "-p", "--mode", "json", "--provider", cfg.get("provider", "openrouter"), "--model",
+               cfg["model"] + (":" + cfg["effort"] if cfg.get("effort") else ""),
+               "--system-prompt", open(system_file).read(), "--tools", "read,bash,edit,write",
+               "--session-dir", os.path.join(HERE, "out", "pi-sessions")]
+        return cmd + (["--session", resume] if resume else []), {}
+    cmd = [a.replace("{prompt}", "") for a in cfg["agent"]]
     if resume:
         cmd += ["--resume", resume]
-    meta = {}
-    if cmd and os.path.basename(cmd[0]) == "claude":
+    if h == "claude":
         if cfg.get("system") == "replace":
             # our text is the whole system prompt: the leader first, no coding-assistant identity
             cmd += ["--system-prompt-file", system_file, "--output-format", "json"]
         else:
             cmd += ["--append-system-prompt-file", system_file, "--output-format", "json",
                     "--exclude-dynamic-system-prompt-sections"]
-    stdin = None if any("{prompt}" in a for a in cfg["agent"]) else prompt
+        if cfg.get("model"):
+            cmd += ["--model", cfg["model"]]
+        if cfg.get("effort"):
+            cmd += ["--effort", cfg["effort"]]
+    return cmd, {}
+
+
+def parse_output(h, stdout):
+    """(final words, meta, error) from a harness's output. meta: session_id, model, cost, tokens."""
+    out = stdout.strip()
+    if h == "claude" and out.startswith("{"):
+        data = json.loads(out)
+        meta = {k: data.get(k) for k in ("session_id", "total_cost_usd", "num_turns", "duration_ms", "usage", "modelUsage")}
+        text = data.get("result") or ""
+        return text, meta, (text or data.get("subtype") or "error") if data.get("is_error") else None
+    rows = []
+    for line in out.splitlines():
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            pass
+    if h == "codex":
+        texts = [r["item"].get("text", "") for r in rows if r.get("type") == "item.completed"
+                 and r.get("item", {}).get("type") == "agent_message"]
+        usage = [r.get("usage") for r in rows if r.get("type") == "turn.completed"]
+        sid = next((r.get("thread_id") for r in rows if r.get("type") == "thread.started"), None)
+        errs = [r.get("message") or r.get("error") for r in rows if r.get("type") in ("error", "turn.failed")]
+        meta = {"session_id": sid, "usage": usage[-1] if usage else None,
+                "num_turns": sum(1 for r in rows if r.get("type") == "item.completed")}
+        return (texts[-1] if texts else ""), meta, (str(errs[-1])[:300] if errs and not texts else None)
+    if h == "pi":
+        sid = next((r.get("id") for r in rows if r.get("type") == "session"), None)
+        end = next((r for r in reversed(rows) if r.get("type") == "agent_end"), None)
+        msgs = [m for m in (end or {}).get("messages", []) if m.get("role") == "assistant"]
+        text = "".join(c.get("text", "") for c in (msgs[-1]["content"] if msgs else []) if c.get("type") == "text")
+        cost = sum(((m.get("usage") or {}).get("cost") or {}).get("total", 0) for m in msgs)
+        usage = {k: sum((m.get("usage") or {}).get(k, 0) for m in msgs) for k in ("input", "output", "cacheRead", "reasoning")}
+        meta = {"session_id": sid, "total_cost_usd": round(cost, 5), "usage": usage, "num_turns": len(msgs),
+                "model": msgs[-1].get("model") if msgs else None}
+        stop = msgs[-1].get("stopReason") if msgs else None
+        return text, meta, ("no answer" if end is None else ("stopped: %s" % stop if stop == "error" else None))
+    return out, {}, None
+
+
+def run_agent(cfg, prompt, resume=None, system_file=SYSTEM_FILE, extra_env=None):
+    h = harness_of(cfg)
+    cmd, henv = agent_command(cfg, system_file, resume)
+    stdin = None if any("{prompt}" in a for a in cfg["agent"]) and h not in ("codex", "pi") else prompt
+    if stdin is None:
+        cmd = [a.replace("{prompt}", prompt) for a in cfg["agent"]]
     t0 = time.time()
-    error = None
+    error, meta = None, {}
     try:
         env = {k: v for k, v in os.environ.items() if not k.startswith("CIV_") or k in ("CIV_BOTTLE", "CIV_GAME")}
         env["CIV_ACTOR"] = "agent"   # marks the player's own commands in the logs
+        env.update(henv)
         env.update(extra_env or {})
         r = subprocess.run(cmd, input=stdin, capture_output=True, text=True, cwd=HERE, env=env,
                            timeout=cfg.get("timeout_minutes", 15) * 60)
-        out = r.stdout.strip() or r.stderr.strip()
-        if out.startswith("{"):
-            # the json result: the final words plus what the wake-up cost and which model ran it
-            try:
-                data = json.loads(out)
-                out = data.get("result") or ""
-                meta = {k: data.get(k) for k in ("session_id", "total_cost_usd", "num_turns", "duration_ms", "usage", "modelUsage")}
-                if data.get("is_error"):
-                    error = out or data.get("subtype") or "error"
-            except ValueError:
-                pass
+        try:
+            out, meta, error = parse_output(h, r.stdout)
+        except (ValueError, KeyError, TypeError) as e:
+            out, error = r.stdout.strip(), "unreadable output: %s" % e
+        if not out and r.stderr.strip() and r.returncode != 0:
+            out = r.stderr.strip()
         if r.returncode != 0 and not error:
             error = (out or "exit code %d" % r.returncode)[-300:]
     except subprocess.TimeoutExpired:
         out = "(timed out)"
     except OSError as e:
         out = error = "could not start the agent: %s" % e
+    meta["harness"] = h
     return out, time.time() - t0, meta, error
 
 
