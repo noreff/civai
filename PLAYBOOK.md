@@ -101,6 +101,6 @@ Ordering:
 - Answers: `civ proposals`, then `civ answer N yes|no` (a vote: yes/no/abstain or a leader's name; an event: the option number; a free tech: its name). No answer by the end of the next turn counts as no.
 - `civ say [--to <leader>] [--think "..."] "..."`, `civ think "..."`, `civ director "..."`.
 
-Events you will see: `message_from_leader` (another leader wrote to you or to all), `proposal` (something waits for your answer), `deal_done` / `deal_declined` / `deal_failed`, `first_contact`, `war_declared` / `peace_made`, `city_changed_hands`, `unit_waiting` (a settler or great person waits for orders), `unit_done`, `city_queue_done` (a city's build list ran out), `treasury_empty` (research stalls and unpaid units desert), `unit_disbanded`, `rewind` (an older save was loaded: what came after it never happened).
+Events you will see: `message_from_leader` (another leader wrote to you or to all), `proposal` (something waits for your answer), `deal_done` / `deal_declined` / `deal_failed`, `first_contact`, `war_declared` / `peace_made`, `city_changed_hands`, `unit_waiting` (a settler or great person waits for orders), `unit_done`, `improvement_built` (a farm, mine, road... finished on your land), `city_queue_done` (a city's build list ran out), `treasury_empty` (research stalls and unpaid units desert), `unit_disbanded`, `rewind` (an older save was loaded: what came after it never happened).
 
 You play by the same difficulty rules as a human player (upgrade prices, unit supply, inflation, war weariness).

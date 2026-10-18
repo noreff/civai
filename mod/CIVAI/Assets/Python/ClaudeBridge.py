@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 86
+BRIDGE_VERSION = 87
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -973,6 +973,11 @@ def recordEvent(tag, a):
 		c = a[0]
 		if c.getOwner() == iMe or c.plot().isRevealed(iTeam, False):
 			writeEvent("city_founded", {"name": c.getName(), "owner": pname(c.getOwner()), "x": c.getX(), "y": c.getY()})
+	elif tag == "improvementBuilt":
+		# a worker's job finished on our land: the farm, mine or cottage is there now
+		pl = CyMap().plot(a[1], a[2])
+		if not pl.isNone() and pl.getOwner() == iMe and a[0] >= 0:
+			writeEvent("improvement_built", {"improvement": gc.getImprovementInfo(a[0]).getDescription(), "x": a[1], "y": a[2]})
 	elif tag == "cityAcquired":
 		prev, new, c, conquest = a[0], a[1], a[2], a[3]
 		if iMe in (prev, new) or c.plot().isRevealed(iTeam, False):
