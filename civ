@@ -632,7 +632,7 @@ def main(argv):
             print(fmt_record(call("research", args)))
         elif cmd == "build":
             words = [a for a in argv[1:] if not a.startswith("--")]
-            args = {"name": words[0], "item": " ".join(words[1:])}
+            args = {"name": words[0], "item": " ".join(words[1:]), "words": words}   # the bridge finds a city name of several words
             for flag in ("queue", "first", "check"):
                 if "--" + flag in argv:
                     args[flag] = True

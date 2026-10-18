@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 82
+BRIDGE_VERSION = 83
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1377,6 +1377,29 @@ def alone(u, args):
 	if not args.get("stack") and u.getGroup().getNumUnits() > 1 and hasattr(u, "claudeLeaveGroup"):
 		u.claudeLeaveGroup()
 
+def whyNoMove(u, pl, turns):
+	# the reason a move was refused, in the game's terms, so the player can choose another way
+	land = gc.getUnitInfo(u.getUnitType()).getDomainType() == DomainTypes.DOMAIN_LAND
+	iTeam = gc.getPlayer(u.getOwner()).getTeam()
+	if not pl.isRevealed(iTeam, False):
+		return "that tile is unexplored; the pathfinder only plans through tiles you have seen"
+	if land and pl.isWater():
+		return "it is water (%s); a land unit needs a boat to cross" % gc.getTerrainInfo(pl.getTerrainType()).getDescription()
+	if not land and not pl.isWater() and not pl.isCity():
+		return "it is land; a ship moves on water and into coastal cities only"
+	if pl.isImpassable():
+		return "it is impassable (peak)"
+	if u.movesLeft() <= 0:
+		return "the unit has no moves left this turn; order it again next turn"
+	owner = pl.getOwner()
+	if owner >= 0 and gc.getPlayer(owner).getTeam() != iTeam and not gc.getTeam(iTeam).isOpenBorders(gc.getPlayer(owner).getTeam()) \
+			and not gc.getTeam(iTeam).isAtWar(gc.getPlayer(owner).getTeam()):
+		return "it is %s's land, and without open borders (or war) your units can't enter it" % pname(owner)
+	if turns < 0:
+		return ("the game's pathfinder finds no route: every way there is blocked (water, peaks, or the land of a civ "
+			"you have no open borders with). `civ around %d %d` shows the tiles around it" % (u.getX(), u.getY()))
+	return "the game refused the order (try `civ actions %d`)" % u.getID()
+
 def cmdMove(args):
 	# order a unit to walk to x, y (alone, or with its stack: --stack); multi-turn paths are fine
 	u = myUnit(args["id"])
@@ -1394,7 +1417,7 @@ def cmdMove(args):
 	setClaim(u.getID(), [x, y])
 	g.pushMission(MissionTypes.MISSION_MOVE_TO, x, y, 0, False, True, MissionAITypes.NO_MISSIONAI, pl, u)
 	if (u.getX(), u.getY()) == before and g.getLengthMissionQueue() == 0 and before != (x, y):
-		raise Exception("unit #%d did not accept the move to %d,%d (unreachable or no moves?)" % (u.getID(), x, y))
+		raise Exception("unit #%d can't go to %d,%d: %s" % (u.getID(), x, y, whyNoMove(u, pl, turns)))
 	r = {"id": u.getID(), "from": before, "now_at": (u.getX(), u.getY()), "target": (x, y),
 		"moves_left": u.movesLeft(), "missions_queued": g.getLengthMissionQueue()}
 	if turns >= 0:
@@ -1773,15 +1796,46 @@ def cmdActions(args):
 		"moves_left": u.movesLeft() / gc.getMOVE_DENOMINATOR(),
 		"actions": [n for (n, a, t) in acts if not t], "with_target_x_y": [n for (n, a, t) in acts if t]}
 
+ACTION_WORDS = {"DISBAND": "DELETE", "FOUND_CITY": "FOUND", "SETTLE": "FOUND", "EXPLORE": "AUTO_EXPLORE",
+	"DISCOVER_TECH": "DISCOVER", "GOLDEN_AGE": "GOLDEN_AGE", "WAIT": "SKIP"}
+
+def whyNoFound(u):
+	pl = u.plot()
+	if pl.isCity():
+		return "this tile is already a city"
+	if pl.isWater():
+		return "a city can't stand on water"
+	owner = pl.getOwner()
+	if owner >= 0 and owner != u.getOwner():
+		return "this is %s's land" % pname(owner)
+	r = gc.getDefineINT("MIN_CITY_RANGE")
+	for dx in range(-r, r + 1):
+		for dy in range(-r, r + 1):
+			q = CyMap().plot(u.getX() + dx, u.getY() + dy)
+			if not q.isNone() and q.isCity():
+				return "%s at %d,%d is too close (cities must be more than %d tiles apart)" % (q.getPlotCity().getName(), q.getX(), q.getY(), r)
+	if u.movesLeft() <= 0:
+		return "the settler has no moves left this turn"
+	return "the game's rules don't allow a city on this tile"
+
 def cmdDo(args):
 	# do one of the unit's available actions; queue=true adds it after its current orders
 	u = myUnit(args["id"])
 	want = args["action"].strip().upper().replace(" ", "_")
 	acts = unitActions(u)
+	want = ACTION_WORDS.get(want, want)
 	match = [x for x in acts if x[0] == want]
 	if not match:
-		raise Exception("%s #%d can't %s here now. It can: %s" % (gc.getUnitInfo(u.getUnitType()).getDescription(),
-			u.getID(), want, ", ".join([n for (n, a, t) in acts])))
+		# the start or part of an available action's name, if only one fits ("FARM" -> BUILD_FARM)
+		part = [x for x in acts if want in x[0]]
+		if len(part) == 1:
+			match = part
+	if not match:
+		why = ""
+		if want == "FOUND" and gc.getUnitInfo(u.getUnitType()).isFound():
+			why = " (%s)" % whyNoFound(u)
+		raise Exception("%s #%d can't %s here now%s. It can: %s" % (gc.getUnitInfo(u.getUnitType()).getDescription(),
+			u.getID(), want, why, ", ".join([n for (n, a, t) in acts])))
 	name, a, targeted = match[0]
 	if name != "LEAD":
 		alone(u, args)
@@ -3774,14 +3828,35 @@ def doWarTrampoline(argsList):
 CITY_CLAIMS_FILE = OUT_DIR + "\\city_claims.json"
 
 def findInfo(want, count, getter, prefix):
-	# by type ("TECH_ARCHERY") or description ("Archery"), case-insensitive
-	w = want.strip().lower().replace(" ", "_")
-	for i in range(count):
-		info = getter(i)
-		t = info.getType().lower()
-		if t == w or t == prefix + w or info.getDescription().lower().replace(" ", "_") == w:
-			return i
+	# by type ("TECH_ARCHERY") or description ("Archery"), case-insensitive; then forgiving the way a
+	# person is: a plural ("Warriors"), or the start of a name if only one name starts so ("Bronze")
+	w = want.strip().lower().replace(" ", "_").replace("-", "_")
+	if not w:
+		return -1
+	names = [(i, getter(i).getType().lower(), getter(i).getDescription().lower().replace(" ", "_")) for i in range(count)]
+	for cand in (w, w.endswith("s") and w[:-1] or None, w.endswith("es") and w[:-2] or None):
+		if not cand:
+			continue
+		for (i, t, d) in names:
+			if t == cand or t == prefix + cand or d == cand:
+				return i
+	starts = [i for (i, t, d) in names if d.startswith(w)]
+	if len(starts) == 1:
+		return starts[0]
 	return -1
+
+def suggest(want, count, getter):
+	# close names for a "did you mean" (difflib: the game's names against what was typed)
+	import difflib
+	descs = [getter(i).getDescription() for i in range(count)]
+	low = dict([(d.lower(), d) for d in descs])
+	hits = difflib.get_close_matches(want.strip().lower(), low.keys(), 3, 0.6)
+	starts = [d for d in descs if want.strip().lower().split(" ")[0] and d.lower().startswith(want.strip().lower().split(" ")[0])]
+	out = []
+	for h in [low[x] for x in hits] + starts:
+		if h not in out:
+			out.append(h)
+	return out[:4] and " Did you mean: %s?" % ", ".join(out[:4]) or ""
 
 def techName(i):
 	if i < 0:
@@ -3809,7 +3884,8 @@ def cmdResearch(args):
 	if args.get("tech"):
 		i = findInfo(args["tech"], gc.getNumTechInfos(), gc.getTechInfo, "tech_")
 		if i < 0:
-			raise Exception("no tech called %s" % args["tech"])
+			raise Exception("no tech called %s (one tech per command).%s" % (args["tech"],
+				suggest(args["tech"], gc.getNumTechInfos(), gc.getTechInfo)))
 		if gc.getTeam(p.getTeam()).isHasTech(i):
 			raise Exception("we already know %s" % techName(i))
 		p.pushResearch(i, not args.get("queue"))
@@ -3851,6 +3927,34 @@ def cityItemDone(c, order, data):
 		q.pop(0)
 		saveCityClaims(d)
 
+def buildableNow(c):
+	units = [gc.getUnitInfo(i).getDescription() for i in range(gc.getNumUnitInfos()) if c.canTrain(i, False, False)]
+	builds = [gc.getBuildingInfo(i).getDescription() for i in range(gc.getNumBuildingInfos()) if c.canConstruct(i, False, False, False)]
+	return units + builds
+
+def whyCantBuild(c, order, i):
+	# the game's reason, as the city screen would show it
+	team = gc.getTeam(c.getTeam())
+	if order == OrderTypes.ORDER_TRAIN:
+		info = gc.getUnitInfo(i)
+	elif order == OrderTypes.ORDER_CONSTRUCT:
+		info = gc.getBuildingInfo(i)
+		if c.getNumRealBuilding(i) > 0:
+			return "it already has one"
+		if info.getPrereqReligion() >= 0 and not c.isHasReligion(info.getPrereqReligion()):
+			return "it needs %s in the city" % gc.getReligionInfo(info.getPrereqReligion()).getDescription()
+	else:
+		return "the game's rules don't allow it here now"
+	tech = info.getPrereqAndTech()
+	if tech >= 0 and not team.isHasTech(tech):
+		return "it needs the tech %s" % gc.getTechInfo(tech).getDescription()
+	bonus = info.getPrereqAndBonus()
+	if bonus >= 0 and not c.hasBonus(bonus):
+		return "it needs %s connected to the city" % gc.getBonusInfo(bonus).getDescription()
+	if order == OrderTypes.ORDER_TRAIN and gc.getPlayer(c.getOwner()).canTrain(i, False, True) is False:
+		return "your civilization doesn't build this unit (another unit replaces it)"
+	return "a requirement of the game isn't met (coast, river, a building it needs first, or a limit)"
+
 def findItem(want):
 	# a unit, building, project or process for a city's queue
 	for (order, count, getter, prefix) in (
@@ -3861,12 +3965,25 @@ def findItem(want):
 		i = findInfo(want, count, getter, prefix)
 		if i >= 0:
 			return order, i, getter(i).getDescription()
-	raise Exception("nothing called %s to build" % want)
+	near = suggest(want, gc.getNumUnitInfos(), gc.getUnitInfo) or suggest(want, gc.getNumBuildingInfos(), gc.getBuildingInfo)
+	raise Exception("nothing called %s to build.%s" % (want, near))
 
 def cmdBuild(args):
 	# what a city of ours builds: replace the current item (default), queue=true to add at the end,
 	# first=true to put it in front; check=true only tells whether it is possible
 	iMe, iTeam = myIds()
+	if args.get("words"):
+		# "Addis Ababa Library": the longest start of the words that names a city is the city
+		words = args["words"]
+		for k in range(len(words) - 1, 0, -1):
+			try:
+				findCity({"name": " ".join(words[:k])})
+			except:
+				continue
+			args["name"], args["item"] = " ".join(words[:k]), " ".join(words[k:])
+			break
+		else:
+			args["name"], args["item"] = words[0], " ".join(words[1:])
 	c = findCity(args)
 	if c.getOwner() != iMe:
 		raise Exception("%s is not our city" % c.getName())
@@ -3890,7 +4007,8 @@ def cmdBuild(args):
 	else:
 		possible = c.canMaintain(i, False)
 	if not possible:
-		raise Exception("%s can't build %s now" % (c.getName(), name))
+		raise Exception("%s can't build %s now: %s. It can build now: %s" % (c.getName(), name, whyCantBuild(c, order, i),
+			", ".join(buildableNow(c))))
 	if g_queueWaiting.has_key(cityKey(c)):
 		del g_queueWaiting[cityKey(c)]
 	if args.get("check"):
