@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 156
+BRIDGE_VERSION = 157
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -2252,6 +2252,17 @@ def cmdActions(args):
 		"actions": [n for (n, a, t) in acts if not t], "with_target_x_y": [n for (n, a, t) in acts if t]}
 	if jobText(u):
 		r["job"] = jobText(u)
+	if [n for (n, a, t) in acts if n.startswith("BUILD_")]:
+		# a worker's jobs depend on the tile it stands on: say what that tile is, so a missing job is explained
+		pl = u.plot()
+		ground = [pl.isHills() and "hill" or pl.isPeak() and "peak" or "flat",
+			gc.getTerrainInfo(pl.getTerrainType()).getDescription().lower()]
+		if pl.getFeatureType() >= 0:
+			ground.append(gc.getFeatureInfo(pl.getFeatureType()).getDescription().lower())
+		if pl.getImprovementType() >= 0:
+			ground.append("has a %s" % gc.getImprovementInfo(pl.getImprovementType()).getDescription())
+		r["jobs_are_for_this_tile"] = ("%d,%d is %s. Jobs differ by tile: a mine needs a hill or a mineral resource, "
+			"chopping needs forest or jungle on the tile; move the worker there to get them" % (u.getX(), u.getY(), ", ".join(ground)))
 	if u.getDomainType() == DomainTypes.DOMAIN_AIR:
 		r["air"] = ("range %d tiles from its base. Strike enemy units: civ move %d X Y --attack (a tile within range; "
 			"`civ odds X Y %d` first); rebase: civ move %d X Y to a city or carrier of yours within range") % (
