@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 72
+BRIDGE_VERSION = 73
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1087,7 +1087,65 @@ def writeTruth(turn):
 			"met": [j for j in range(gc.getMAX_CIV_TEAMS()) if j != p.getTeam() and t.isHasMet(j)]})
 	appendLine(OUT_DIR + "\\truth.jsonl", {"turn": turn, "time": time.strftime("%Y-%m-%d %H:%M:%S"), "civs": rows})
 
+# The director's camera (the screen is for the recording only; no agent reads it). In a game of AI seats
+# watched by a defeated spectator: the whole map once (debug view, needs the game's cheat code), then the
+# camera goes to the newest news, at most every few seconds; a quiet turn shows the next AI leader's capital.
+CAMERA_KINDS = {"cityAcquired": 3, "cityRazed": 3, "combatResult": 2, "cityBuilt": 1}
+g_camera = {"at": 0.0, "prio": 0, "debug_tried": False, "turn_news": False, "next_seat": 0}
+
+def spectating():
+	if not seatsConfigured():
+		return False
+	p = gc.getPlayer(gc.getGame().getActivePlayer())
+	return not p.isAlive() and not agentPlayers().count(gc.getGame().getActivePlayer())
+
+def cameraTo(x, y, prio):
+	now = time.time()
+	if now - g_camera["at"] < 8 and prio <= g_camera["prio"]:
+		return
+	plot = gc.getMap().plot(x, y)
+	if plot.isNone():
+		return
+	CyCamera().JustLookAtPlot(plot)
+	g_camera["at"], g_camera["prio"], g_camera["turn_news"] = now, prio, True
+
+def directorCamera(tag, a):
+	if not spectating():
+		return
+	g = gc.getGame()
+	if not g_camera["debug_tried"]:
+		g_camera["debug_tried"] = True
+		if not g.isDebugMode():
+			g.toggleDebugMode()
+			if not g.isDebugMode():
+				g.toggleDebugMode()   # no cheat code: the game ignores it; leave the view as it was
+				log("director camera: no full-map view (set CheatCode in CivilizationIV.ini)")
+	if tag == "BeginGameTurn":
+		if not g_camera["turn_news"]:
+			seats = [i for i in agentPlayers() if gc.getPlayer(i).isAlive() and not gc.getPlayer(i).getCapitalCity().isNone()]
+			if seats:
+				c = gc.getPlayer(seats[g_camera["next_seat"] % len(seats)]).getCapitalCity()
+				g_camera["next_seat"] = g_camera["next_seat"] + 1
+				cameraTo(c.getX(), c.getY(), 0)
+		g_camera["turn_news"], g_camera["prio"] = False, 0
+		return
+	prio = CAMERA_KINDS.get(tag)
+	if not prio:
+		return
+	if tag == "combatResult":
+		if a[0].isAnimal() or a[1].isAnimal():
+			return
+		cameraTo(a[1].getX(), a[1].getY(), prio)
+	elif tag == "cityAcquired":
+		cameraTo(a[2].getX(), a[2].getY(), prio)
+	else:
+		cameraTo(a[0].getX(), a[0].getY(), prio)
+
 def safeRecordEvent(tag, args):
+	try:
+		directorCamera(tag, args)
+	except:
+		log("director camera FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 	try:
 		if tag == "BeginGameTurn" and seatsConfigured():
 			try:
