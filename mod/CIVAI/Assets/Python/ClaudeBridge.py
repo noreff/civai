@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 91
+BRIDGE_VERSION = 93
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1801,9 +1801,36 @@ def unitActions(u):
 def cmdActions(args):
 	u = myUnit(args["id"])
 	acts = unitActions(u)
-	return {"id": u.getID(), "unit": gc.getUnitInfo(u.getUnitType()).getDescription(), "at": (u.getX(), u.getY()),
+	r = {"id": u.getID(), "unit": gc.getUnitInfo(u.getUnitType()).getDescription(), "at": (u.getX(), u.getY()),
 		"moves_left": u.movesLeft() / gc.getMOVE_DENOMINATOR(),
 		"actions": [n for (n, a, t) in acts if not t], "with_target_x_y": [n for (n, a, t) in acts if t]}
+	gives = actionYields(u, [n for (n, a, t) in acts], acts)
+	if gives:
+		r["what_they_give"] = gives
+	return r
+
+def actionYields(u, names, acts=()):
+	# what a great person's action would give here (a human sees it hovering the button)
+	pl = u.plot()
+	out = []
+	if "DISCOVER" in names:
+		t = u.getDiscoveryTech()
+		if t >= 0:
+			out.append("DISCOVER: %s, %d research" % (gc.getTechInfo(t).getDescription(), u.getDiscoverResearch(t)))
+	if "HURRY" in names:
+		out.append("HURRY: %d production in %s" % (u.getHurryProduction(pl), pl.isCity() and pl.getPlotCity().getName() or "this city"))
+	if "TRADE" in names:
+		out.append("TRADE: %d gold" % u.getTradeGold(pl))
+	if "GREAT_WORK" in names:
+		out.append("GREAT_WORK: %d culture in %s" % (u.getGreatWorkCulture(pl), pl.isCity() and pl.getPlotCity().getName() or "this city"))
+	for (n, a, t) in acts:
+		if n == "CONSTRUCT" and a.getMissionData() >= 0:
+			out.append("CONSTRUCT: builds %s here" % gc.getBuildingInfo(a.getMissionData()).getDescription())
+		if n == "JOIN" and a.getMissionData() >= 0:
+			out.append("JOIN: settles in this city as a %s for good" % gc.getSpecialistInfo(a.getMissionData()).getDescription())
+	if "ESPIONAGE" in names or "INFILTRATE" in names:
+		out.append("INFILTRATE: %d espionage points" % u.getEspionagePoints(pl))
+	return out
 
 ACTION_WORDS = {"DISBAND": "DELETE", "FOUND_CITY": "FOUND", "SETTLE": "FOUND", "EXPLORE": "AUTO_EXPLORE",
 	"DISCOVER_TECH": "DISCOVER", "GOLDEN_AGE": "GOLDEN_AGE", "WAIT": "SKIP"}
