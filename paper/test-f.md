@@ -19,7 +19,7 @@ Game `games/2026-10-18-test-f`: Pangaea, Small, Quick, Noble, five slots (a spec
 | messages sent | 404 | 49 | 199 | 364 |
 | deals made | 97 | 68 | 16 | 51 |
 | tool calls / errors | 4276 / 124 | 1622 / 93 | 4760 / 182 | 13831 / 532 |
-| cost | $168.88 | $42.42 | subscription | $25.45 |
+| cost | Max subscription ($168.88 at API list prices) | Max subscription ($42.42 at list prices) | ChatGPT subscription | $25.45 paid (OpenRouter) |
 | final score / cities | 5288 / 16 | 2306 / 3 | 0 / 0 | 5728 / 15 |
 
 ## What each model did (from the logs; quotes verbatim)
