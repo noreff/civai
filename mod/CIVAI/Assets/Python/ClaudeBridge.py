@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 110
+BRIDGE_VERSION = 112
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3112,13 +3112,17 @@ def executeDeal(a, b, giveA, giveB):
 		# the game's own CvGame::implementDeal: ongoing items become real deals, memories as usual
 		if not gc.getPlayer(a).implementDealText(b, engineText(giveA), engineText(giveB)):
 			raise Exception("the game refused the deal")
-		refreshSnapshot()
-		return
-	for it in giveA:
-		doItem(a, b, it)
-	for it in giveB:
-		doItem(b, a, it)
-	refreshSnapshot()   # our own deal: not a "native" one
+	else:
+		for it in giveA:
+			doItem(a, b, it)
+		for it in giveB:
+			doItem(b, a, it)
+	# a deal made through CIVAI is explained for both sides: each agent's own snapshot takes it in (else
+	# the other agent saw it as an unexplained change, e.g. a peace it had agreed to)
+	refreshSnapshot()
+	for x in (a, b):
+		if isAgent(x):
+			asSeatOf(x, refreshSnapshot)
 
 DUAL_ITEMS = ("open_borders", "defensive_pact", "permanent_alliance", "peace")   # the game's two-way treaties
 
@@ -4268,11 +4272,17 @@ def cmdVotes(args):
 					kind = " (full member)"
 				members.append("%s%s: %s votes" % (pname(i), kind, v))
 		rel = g.getVoteSourceReligion(vs)
+		# the game (CvGame::doVoteSelection) holds a session when the vote timer runs out, then sets it again to
+		# `every`; the Resident's timer counts sessions, not turns: at 0 the next session is an election
+		every = gc.getVoteSourceInfo(vs).getVoteInterval() * gc.getGameSpeedInfo(g.getGameSpeedType()).getVictoryDelayPercent() / 100
+		sessions = g.getSecretaryGeneralTimer(vs)
 		out[name] = {"religion": rel >= 0 and gc.getReligionInfo(rel).getDescription() or "-",
 			"resident": ", ".join(resident) or "none yet",
 			"members (leaders you know)": members or ["none"],
-			"next resolution in turns": g.getVoteTimer(vs),
-			"next Resident election in turns": g.getSecretaryGeneralTimer(vs),
+			"next session in turns": g.getVoteTimer(vs),
+			"next session holds": sessions == 0 and "the election of the Resident (no resolution that session)" or
+				"a resolution the Resident chooses",
+			"next Resident election in turns": g.getVoteTimer(vs) + sessions * (every + 1),
 			"diplomatic victory": victoryVotes(vs) or ["no resolution here wins the game"]}
 	return out
 

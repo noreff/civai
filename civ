@@ -93,7 +93,7 @@
   civ say "<text>"         chat line to the player in the game, from you
   civ say --popup "<text>" the same as a popup window
   civ votes                the Voting screen: Apostolic Palace / United Nations, Resident, members, votes,
-                           turns to the next resolution and the next Resident election
+                           turns to the next session (resolution or Resident election), what it holds, and the share of votes a diplomatic victory needs
   civ work <city> [X Y | <specialist> +N|-N | auto]   which tiles the citizens work (a human's clicks on the
                            city screen): no more words shows them; X Y takes or frees a tile; auto: the governor
   civ say --think "<thought>" "<text>"   the thought behind it and the message, in one call

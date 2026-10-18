@@ -854,9 +854,8 @@ def handle(cfg, d, st, events, chat, reasons):
     else:
         prompt = prompt_for(d, events, chat, reasons)
     sysf = SYSTEM_FILE_V2 if v2 else SYSTEM_FILE
-    m = re.search(r"[Tt]urn (\d+)[,:]", prompt)
-    if m:
-        turn = m.group(1)
+    if start_turn < 10 ** 6:
+        turn = start_turn    # the game's own clock (the brief can quote other turns, e.g. in a message)
     cmds_pos = os.path.getsize(cmds_path) if os.path.exists(cmds_path) else 0
     th_pos = os.path.getsize(thoughts_path) if os.path.exists(thoughts_path) else 0
     # the same effort policy for every seat: a working turn at the seat's effort, a sitting that asks for judgment deeper
