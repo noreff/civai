@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 43
+BRIDGE_VERSION = 45
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -790,6 +790,7 @@ def recordEvent(tag, a):
 		g_guardDue[0] = True   # undo what the last window changed before Claude looks at anything
 		if a[1] == iMe:
 			snapCities(gc.getPlayer(iMe))
+			snapUnits(gc.getPlayer(iMe))
 			writeEvent("my_turn_begins", {})
 		elif gc.getPlayer(a[1]).isHuman():
 			# fired before the game turn counter moves on: the player is about to play turn a[0] + 1
@@ -854,19 +855,10 @@ def recordEvent(tag, a):
 			writeEvent(kind, {"team": gc.getTeam(t1).getName(), "against": gc.getTeam(t2).getName()})
 	elif tag == "cityHurry" and a[0].getOwner() == iMe and g_window[0] == ("own", iMe):
 		undoHurry(a[0], int(a[1]))
-	elif tag == "unitKilled" and a[0].getOwner() == iMe and int(a[1]) < 0 and g_window[0] == ("own", iMe) and g_strike[0] > 0:
-		# the game's own rule: an empty treasury makes units desert (CvPlayer::doGold); that stays
-		g_strike[0] = g_strike[0] - 1
-		writeEvent("unit_disbanded", {"unit": gc.getUnitInfo(a[0].getUnitType()).getDescription(), "id": a[0].getID(),
-			"at": [a[0].getX(), a[0].getY()], "why": "the treasury was empty: units go unpaid and desert (the game's rule)"})
-	elif tag == "unitKilled" and a[0].getOwner() == iMe and int(a[1]) < 0 and g_window[0] == ("own", iMe):
-		# killed by nobody during our own between-turns processing: the built-in AI disbanding it
-		# (AI_doMilitary in "financial trouble") or upgrading it; put back in restoreDisbanded
-		u = a[0]
-		g_disbanded.append({"id": u.getID(), "type": u.getUnitType(), "x": u.getX(), "y": u.getY(),
-			"xp": u.getExperience(), "level": u.getLevel(), "damage": u.getDamage(),
-			"promos": [k for k in range(gc.getNumPromotionInfos()) if u.isHasPromotion(k)],
-			"turn": gc.getGame().getGameTurn()})
+	elif tag == "unitKilled" and a[0].getOwner() == iMe:
+		g_killed[a[0].getID()] = True   # a real death (combat, capture); the game reports it only then
+	elif tag == "unitLost" and a[0].getOwner() == iMe:
+		unitGone(a[0])
 	elif tag == "greatPersonBorn" and a[1] == iMe:
 		writeEvent("great_person", {"unit": gc.getUnitInfo(a[0].getUnitType()).getType(), "city": a[2].getName(),
 			"id": a[0].getID()})
@@ -1396,6 +1388,8 @@ def cmdDo(args):
 			g.clearMissionQueue()
 			return {"id": u.getID(), "will_do": name, "when": "at the start of our next turn (orders given during another player's turn run then)"}
 	elif c >= 0:
+		if name.startswith("UPGRADE"):
+			g_ownUpgrades[u.getID()] = True
 		u.doCommand(CommandTypes(c), a.getCommandData(), -1)
 	else:
 		# automation hands the unit back to the game's own automation
@@ -1476,13 +1470,75 @@ def guardChoices(force=False):
 				undone.append("%d turns of anarchy" % extra)
 	restoreCityQueues(p)
 	restoreDisbanded(p)
+	snapUnits(p)
 	if undone:
 		writeEvent("ai_change_undone", {"undone": undone,
 			"note": "the built-in AI changed this without your order; the bridge put it back"})
 
 g_disbanded = []
 g_strike = [0]
+g_units = {}        # our units as last seen (the game forgets a unit's place before reporting it lost)
+g_killed = {}       # ids that died a real death (unitKilled comes before unitLost)
+g_ownUpgrades = {}  # ids Claude upgraded himself (`civ do <id> UPGRADE_...`)
+
+def snapUnits(p):
+	(u, it) = p.firstUnit(False)
+	while u and not u.isNone():
+		if not u.isDead() and u.getX() >= 0:
+			g_units[u.getID()] = {"id": u.getID(), "type": u.getUnitType(), "x": u.getX(), "y": u.getY(),
+				"xp": u.getExperience(), "level": u.getLevel(), "damage": u.getDamage(),
+				"promos": [k for k in range(gc.getNumPromotionInfos()) if u.isHasPromotion(k)],
+				"turn": gc.getGame().getGameTurn(), "created": u.getGameTurnCreated()}
+		(u, it) = p.nextUnit(it, False)
+
+def upgradeTypes(t):
+	civ = gc.getCivilizationInfo(gc.getPlayer(getClaudePlayer()).getCivilizationType())
+	info = gc.getUnitInfo(t)
+	return [civ.getCivilizationUnits(k) for k in range(gc.getNumUnitClassInfos()) if info.getUpgradeUnitClass(k)]
+
+def unitGone(u):
+	# one of our units left the map: a real death, our own order, the game's bankruptcy rule,
+	# or the built-in AI (an upgrade with our gold, or a disband in "financial trouble")
+	iMe = getClaudePlayer()
+	rec = g_units.pop(u.getID(), None)
+	if g_killed.has_key(u.getID()):
+		del g_killed[u.getID()]
+		return
+	if g_ownUpgrades.has_key(u.getID()):
+		del g_ownUpgrades[u.getID()]
+		return
+	if rec is None:
+		return
+	now = gc.getGame().getGameTurn()
+	ups = upgradeTypes(rec["type"])
+	p = gc.getPlayer(iMe)
+	pl = CyMap().plot(rec["x"], rec["y"])
+	taken = [d.get("upgraded_to") for d in g_disbanded]
+	for k in range(pl.getNumUnits()):
+		v = pl.getUnit(k)
+		if (v.getOwner() == iMe and v.getUnitType() in ups and v.getExperience() == rec["xp"] and v.getLevel() == rec["level"]
+				and v.getGameTurnCreated() == rec["created"] and v.getID() not in taken):   # an upgrade keeps the birth turn
+			rec["upgraded_to"] = v.getID()
+			g_disbanded.append(rec)
+			g_guardDue[0] = True
+			return
+	if g_window[0] != ("own", iMe):
+		return   # used up by an order of ours (a settler founding, a missionary...)
+	if g_strike[0] > 0:
+		g_strike[0] = g_strike[0] - 1
+		writeEvent("unit_disbanded", {"unit": gc.getUnitInfo(rec["type"]).getDescription(), "id": rec["id"],
+			"at": [rec["x"], rec["y"]], "why": "the treasury was empty: units go unpaid and desert (the game's rule)"})
+		return
+	g_disbanded.append(rec)
+	g_guardDue[0] = True
+
 g_citySnap = {}
+
+def refundGold(p, n):
+	# gold the bridge gives back is no deal: the deal detector's snapshot moves with it
+	p.changeGold(n)
+	if g_snap[0] is not None:
+		g_snap[0]["gold"] = g_snap[0]["gold"] + n
 
 def snapCities(p):
 	# our cities as our between-turns processing starts, before the city AI may hurry anything
@@ -1504,7 +1560,7 @@ def undoHurry(c, h):
 	gold, pop, anger = snap["hurry"][h]
 	c.setProduction(snap["production"])
 	if gold:
-		gc.getPlayer(c.getOwner()).changeGold(gold)
+		refundGold(gc.getPlayer(c.getOwner()), gold)
 	if pop:
 		c.changePopulation(pop)
 	if anger:
@@ -1520,32 +1576,35 @@ def restoreDisbanded(p):
 	back = []
 	while g_disbanded:
 		d = g_disbanded.pop(0)
-		pl = CyMap().plot(d["x"], d["y"])
-		upgraded = [pl.getUnit(k) for k in range(pl.getNumUnits()) if pl.getUnit(k).getOwner() == p.getID()
-			and pl.getUnit(k).getUnitType() != d["type"] and pl.getUnit(k).getExperience() == d["xp"]
-			and pl.getUnit(k).getLevel() == d["level"] and pl.getUnit(k).getGameTurnCreated() >= d["turn"] - 1]
+		v = None
+		if d.get("upgraded_to") is not None:
+			v = p.getUnit(d["upgraded_to"])
+			if v is None or v.isNone() or v.isDead():
+				continue   # the upgraded unit is gone already; nothing to swap back
 		u = p.initUnit(d["type"], d["x"], d["y"], UnitAITypes.NO_UNITAI, DirectionTypes.DIRECTION_SOUTH)
-		what = "disbanded"
-		if upgraded:
-			# the AI upgraded it with our gold: take the new unit away and pay the gold back
-			v = upgraded[0]
-			price = u.upgradePrice(v.getUnitType())
-			p.changeGold(price)
-			if claims.has_key(v.getID()):
-				claims[d["id"]] = claims[v.getID()]
-				del claims[v.getID()]
-			what = "upgraded to %s for %d gold (gold returned)" % (gc.getUnitInfo(v.getUnitType()).getDescription(), price)
-			v.kill(False, -1)
 		u.setExperience(d["xp"], -1)
 		u.setLevel(d["level"])
 		for k in d["promos"]:
 			u.setHasPromotion(k, True)
 		u.setDamage(d["damage"], -1)
-		if claims.has_key(d["id"]):
-			claims[u.getID()] = claims[d["id"]]
-			del claims[d["id"]]
+		what = "disbanded"
+		old = d["id"]
+		if v is not None:
+			# the AI upgraded it with our gold: take the new unit away and pay the gold back
+			price = u.upgradePrice(v.getUnitType())
+			refundGold(p, price)
+			what = "upgraded to %s for %d gold (gold returned)" % (gc.getUnitInfo(v.getUnitType()).getDescription(), price)
+			if claims.has_key(v.getID()):
+				claims[old] = claims[v.getID()]
+				del claims[v.getID()]
+			g_killed[v.getID()] = True   # our own undo, not a loss to undo again
+			v.kill(False, -1)
+		if claims.has_key(old):
+			claims[u.getID()] = claims[old]
+			del claims[old]
 		back.append("%s #%d %s at (%d,%d), back as #%d" % (gc.getUnitInfo(d["type"]).getDescription(),
-			d["id"], what, d["x"], d["y"], u.getID()))
+			old, what, d["x"], d["y"], u.getID()))
+	snapUnits(p)
 	if back:
 		saveClaims(claims)
 		writeEvent("ai_change_undone", {"undone": back,
