@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 134
+BRIDGE_VERSION = 135
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1682,7 +1682,7 @@ def deliverChat(frm, text, to):
 	holds everything."""
 	turn = gc.getGame().getGameTurn()
 	full = lambda i: "%s (%s)" % (realName(i), gc.getPlayer(i).getCivilizationShortDescription(0))
-	shown = lambda i: gc.getPlayer(i).getName() != realName(i) and u"%s (%s)" % (gc.getPlayer(i).getName(), full(i)) or full(i)
+	shown = lambda i: gc.getPlayer(i).getName() != realName(i) and u"%s \u00b7 %s" % (gc.getPlayer(i).getName(), realName(i)) or full(i)
 	appendLine(OUT_DIR + "\\chat_all.jsonl", {"from": full(frm), "from_id": frm,
 		"to": to is None and "all" or full(to), "to_id": to, "text": text, "turn": turn, "time": time.strftime("%H:%M:%S")})
 	# like the game's own diplomacy: only leaders who have met the speaker hear him
