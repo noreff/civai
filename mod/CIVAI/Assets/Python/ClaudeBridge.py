@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 102
+BRIDGE_VERSION = 103
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3099,6 +3099,8 @@ def executeDeal(a, b, giveA, giveB):
 		doItem(b, a, it)
 	refreshSnapshot()   # our own deal: not a "native" one
 
+DUAL_ITEMS = ("open_borders", "defensive_pact", "permanent_alliance", "peace")   # the game's two-way treaties
+
 def cmdOffer(args):
 	iMe, iTeam = myIds()
 	other = findPlayer(args["player"])
@@ -3110,6 +3112,12 @@ def cmdOffer(args):
 	get = [parseItem(x) for x in args.get("get") or []]
 	if not give and not get:
 		raise Exception("an offer needs something to give or to get")
+	# treaties are two-way, as on the game's trade screen (adding one on either side puts it on both)
+	for it in [x for x in give + get if x[0] in DUAL_ITEMS]:
+		if it not in give:
+			give.append(it)
+		if it not in get:
+			get.append(it)
 	for it in give:
 		checkItem(iMe, other, it)
 	for it in get:
