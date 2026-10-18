@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 103
+BRIDGE_VERSION = 104
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -84,9 +84,24 @@ def writeAtomic(path, text):
 		f.write(text)
 	finally:
 		f.close()
-	if os.path.exists(path):
-		os.remove(path)
-	os.rename(tmp, path)
+	for attempt in range(5):
+		# under Wine a rename can fail for a moment (a reader holding the file): try again, then write in place
+		try:
+			if os.path.exists(path):
+				os.remove(path)
+			os.rename(tmp, path)
+			return
+		except OSError:
+			time.sleep(0.05)
+	f = open(path, "wb")
+	try:
+		f.write(text)
+	finally:
+		f.close()
+	try:
+		os.remove(tmp)
+	except OSError:
+		pass
 
 def infoType(getter, i):
 	if i < 0:
