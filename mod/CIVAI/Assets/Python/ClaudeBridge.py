@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 149
+BRIDGE_VERSION = 150
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1196,10 +1196,10 @@ def cameraHold(x, y):
 		g_camera["at"] = camClock()
 		pushIn(plot, EVENT_HOLD)
 
-SHOT_SECONDS = 9        # one shot of the cameraman
+SHOT_SECONDS = 14       # one shot of the cameraman (calm: the edit cuts it short anyway)
 EVENT_HOLD = 12         # an event's shot (a battle, a city taken) is held this long before the cameraman moves on
 SHOT_KINDS = ("army", "frontier", "tour", "city", "frontier", "army", "tour", "wide")
-TOUR_SECONDS = 20     # a tour: the whole world from far out, gliding from one capital to another
+TOUR_SECONDS = 30     # a tour: the whole world from far out, gliding from one capital to another
 
 def cameraman():
 	# the spectator's camera never rests: between events it cuts every few seconds to something worth seeing,
@@ -1244,7 +1244,7 @@ def cameraman():
 	g_camera["until"] = now + SHOT_SECONDS
 	# a shot never stands still: the camera drifts a tile or two across it and pushes in a little
 	dx, dy = random.choice(((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)))
-	glide(plot, gc.getMap().plot(x + 2 * dx, y + 2 * dy), zoom, zoom * 0.92, SHOT_SECONDS)
+	glide(plot, gc.getMap().plot(x + dx, y + dy), zoom, zoom * 0.96, SHOT_SECONDS)
 
 def glide(a, b, z0, z1, seconds):
 	if a.isNone():
@@ -1257,7 +1257,7 @@ def glide(a, b, z0, z1, seconds):
 def pushIn(plot, seconds):
 	# an event's shot holds on the place and slowly pushes in
 	z = max(CyCamera().GetZoom(), 0.45)
-	glide(plot, plot, z, z * 0.92, seconds)
+	glide(plot, plot, z, z * 0.96, seconds)
 	shotLabel([plot.getOwner()])
 
 def cameraMoving(now):
