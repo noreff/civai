@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 135
+BRIDGE_VERSION = 136
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1173,8 +1173,12 @@ def spectating():
 		return False   # a save is still loading
 	return not gc.getPlayer(a).isAlive() and not agentPlayers().count(a)
 
+def camClock():
+	# seconds for the camera's timing: in the game (under Wine) time.time() moves in 128 s steps, time.clock() doesn't
+	return time.clock()
+
 def cameraTo(x, y, prio):
-	now = time.time()
+	now = camClock()
 	if prio < g_camera["prio"]:
 		return   # this turn already showed bigger news
 	plot = gc.getMap().plot(x, y)
@@ -1188,7 +1192,7 @@ def cameraHold(x, y):
 	plot = gc.getMap().plot(int(x), int(y))
 	if not plot.isNone():
 		CyCamera().JustLookAtPlot(plot)
-		g_camera["at"] = time.time()
+		g_camera["at"] = camClock()
 
 SHOT_SECONDS = 9        # one shot of the cameraman
 EVENT_HOLD = 12         # an event's shot (a battle, a city taken) is held this long before the cameraman moves on
@@ -1200,7 +1204,7 @@ def cameraman():
 	# screen moves (the game's own random numbers are never used, so nothing in the game changes)
 	if not spectating():
 		return
-	now = time.time()
+	now = camClock()
 	if now - g_camera["at"] < EVENT_HOLD or now < g_camera.get("until", 0):
 		return
 	import random
@@ -5274,7 +5278,7 @@ def poll():
 			try:
 				cameraman()
 			except:
-				g_camera["until"] = time.time() + 60   # a broken shot must not flood the log
+				g_camera["until"] = camClock() + 60   # a broken shot must not flood the log
 				log("cameraman FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 			if seatsConfigured():
 				forEachSeat(seatUpkeep, bool(names))
