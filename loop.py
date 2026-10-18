@@ -790,9 +790,9 @@ def memgit(d):
     """git for a seat's memory history. The history lives outside the seat's folder (games/<id>/history/<seat>.git):
     the agent reads only its folder, and after a rewind the history holds turns that never happened."""
     gd = os.path.join(os.path.dirname(d), "history", os.path.basename(d) + ".git")
+    os.makedirs(os.path.dirname(gd), exist_ok=True)
     if os.path.isdir(os.path.join(d, ".git")) and not os.path.exists(gd):
         import shutil
-        os.makedirs(os.path.dirname(gd), exist_ok=True)
         shutil.move(os.path.join(d, ".git"), gd)
     return ["git", "--git-dir", gd, "--work-tree", d]
 
