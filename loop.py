@@ -144,7 +144,7 @@ def my_land_map():
     import mapview
     _, d = game_dir()
     try:
-        return mapview.brief(mapview.live_state(), os.path.join(d, "map"))
+        return mapview.brief(mapview.live_state())   # no pictures: none were opened in 241 wake-ups
     except Exception as e:
         return "(map unavailable: %s)" % e
 
