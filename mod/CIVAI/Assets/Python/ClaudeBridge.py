@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 52
+BRIDGE_VERSION = 53
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -266,11 +266,51 @@ def riverEdges(pl):
 			m = m | (1 << d)
 	return m
 
+TIMELINE_FILE = OUT_DIR + "\\timeline.json"
+
+def rewindCheck():
+	# an older save loaded: orders, build lists and questions from the later timeline must not replay
+	now = gc.getGame().getGameTurn()
+	last = -1
+	if os.path.exists(TIMELINE_FILE):
+		f = open(TIMELINE_FILE, "rb")
+		try:
+			last = int(fromJson(f.read()).get("turn", -1))
+		finally:
+			f.close()
+	writeAtomic(TIMELINE_FILE, toJson({"turn": now}))
+	if last <= now:
+		return
+	c = loadClaims()
+	for k in c.keys():
+		c[k]["target"] = None
+		c[k]["mission"] = None
+		c[k]["busy"] = False
+	saveClaims(c)
+	p = gc.getPlayer(getClaudePlayer())
+	d = loadCityClaims()
+	(cy, it) = p.firstCity(False)
+	while cy and not cy.isNone():
+		if d.has_key(cityKey(cy)):
+			d[cityKey(cy)] = [[int(cy.getOrderFromQueue(i).eOrderType), cy.getOrderFromQueue(i).iData1] for i in range(cy.getOrderQueueLength())]
+		(cy, it) = p.nextCity(it, False)
+	saveCityClaims(d)
+	o = loadProposals()
+	o["open"] = {}
+	saveProposals(o)
+	writeEvent("rewind", {"from_turn": last, "to_turn": now, "note": "an older save was loaded: unit orders, "
+		"build lists and open questions from the later turns were cleared; your memory files may describe turns "
+		"that haven't happened in this replay"})
+
 def dump(reason):
 	if reason == "load_game":
 		# a loaded save is a new starting point: nothing in it is a deal made since the last look
 		g_snap[0] = None
 		g_window[0] = None
+		try:
+			rewindCheck()
+		except:
+			log("rewind check FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 	iMe = getClaudePlayer()
 	if iMe < 0:
 		log("no AI player to dump for")
@@ -819,7 +859,9 @@ def recordEvent(tag, a):
 		except:
 			log("deal checkpoint FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 		g_turnOf[0] = a[1]
-		g_guardDue[0] = True   # undo what the last window changed before Claude looks at anything
+		g_guardDue[0] = True
+		if a[1] == iMe:
+			writeAtomic(TIMELINE_FILE, toJson({"turn": gc.getGame().getGameTurn()}))   # undo what the last window changed before Claude looks at anything
 		if a[1] == iMe:
 			snapCities(gc.getPlayer(iMe))
 			snapUnits(gc.getPlayer(iMe))
