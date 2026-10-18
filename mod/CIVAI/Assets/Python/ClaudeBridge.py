@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 116
+BRIDGE_VERSION = 119
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1433,6 +1433,16 @@ def whyNoMove(u, pl, turns):
 	iTeam = gc.getPlayer(u.getOwner()).getTeam()
 	if not pl.isRevealed(iTeam, False):
 		return "that tile is unexplored; the pathfinder only plans through tiles you have seen"
+	if gc.getUnitInfo(u.getUnitType()).getDomainType() == DomainTypes.DOMAIN_AIR:
+		d = plotDistance(u.getX(), u.getY(), pl.getX(), pl.getY())
+		if d > u.airRange():
+			return ("an air unit acts only within its range of %d tiles from its base; %d,%d is %d tiles away. Rebase it first "
+				"to a city of yours (or a carrier) within %d tiles of both: civ move %d X Y") % (u.airRange(), pl.getX(), pl.getY(),
+				d, u.airRange(), u.getID())
+		if u.movesLeft() <= 0:
+			return "the air unit has already acted this turn; order it again next turn"
+		return ("an air unit strikes enemy units within range (civ move %d X Y --attack) or rebases to a city or carrier of "
+			"yours; this tile is neither") % u.getID()
 	if land and pl.isWater():
 		return "it is water (%s); a land unit needs a boat to cross" % gc.getTerrainInfo(pl.getTerrainType()).getDescription()
 	if not land and not pl.isWater() and not pl.isCity():
@@ -1473,9 +1483,14 @@ def cmdMove(args):
 	turns = -1
 	if hasattr(g, "claudePathTurns"):
 		turns = g.claudePathTurns(x, y)   # the game's pathfinder: terrain, roads, rivers, this unit's speed
+	had = loadClaims().get(u.getID())
 	setClaim(u.getID(), [x, y])
 	g.pushMission(MissionTypes.MISSION_MOVE_TO, x, y, 0, False, True, MissionAITypes.NO_MISSIONAI, pl, u)
 	if (u.getX(), u.getY()) == before and g.getLengthMissionQueue() == 0 and before != (x, y):
+		# a refused order leaves no standing order behind (else the unit hook would try it again every turn)
+		c = loadClaims()
+		c[u.getID()] = had or {"target": None}
+		saveClaims(c)
 		raise Exception("unit #%d can't go to %d,%d: %s" % (u.getID(), x, y, whyNoMove(u, pl, turns)))
 	r = {"id": u.getID(), "from": before, "now_at": (u.getX(), u.getY()), "target": (x, y),
 		"moves_left": u.movesLeft(), "missions_queued": g.getLengthMissionQueue()}
@@ -1906,6 +1921,10 @@ def cmdActions(args):
 	r = {"id": u.getID(), "unit": gc.getUnitInfo(u.getUnitType()).getDescription(), "at": (u.getX(), u.getY()),
 		"moves_left": u.movesLeft() / gc.getMOVE_DENOMINATOR(),
 		"actions": [n for (n, a, t) in acts if not t], "with_target_x_y": [n for (n, a, t) in acts if t]}
+	if u.getDomainType() == DomainTypes.DOMAIN_AIR:
+		r["air"] = ("range %d tiles from its base. Strike enemy units: civ move %d X Y --attack (a tile within range; "
+			"`civ odds X Y %d` first); rebase: civ move %d X Y to a city or carrier of yours within range") % (
+			u.airRange(), u.getID(), u.getID(), u.getID())
 	if gc.getUnitInfo(u.getUnitType()).isSpy():
 		missions, why = spyMissions(u)
 		target = u.plot().getOwner()
