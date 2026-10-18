@@ -94,8 +94,16 @@ def screen_names(game):
     if not names:
         return
     code = "\n".join(["p = gc.getPlayer(%d)\nif hasattr(p, 'claudeSetName'): p.claudeSetName(%r)" % (i, n)
-                      for i, n in names.items()]) + \
-        "\nimport ClaudeBridge as B\nresult = dict([(i, (gc.getPlayer(i).getName(), B.realName(i))) for i in %r])" % list(names)
+                      for i, n in names.items()])
+    if conf.get("label_builtin", True):
+        # the game's own AI players get a label too, so the video tells them from the models: "Civ IV AI (Cyrus)"
+        code += ("\nimport ClaudeBridge as B\nfor i in range(gc.getMAX_CIV_PLAYERS()):\n"
+                 "\tp = gc.getPlayer(i)\n"
+                 "\tif p.isEverAlive() and not p.isHuman() and i not in %r and hasattr(p, 'claudeSetName'):\n"
+                 "\t\tp.claudeSetName(u'Civ IV AI (%%s)' %% B.realName(i))" % list(names))
+        code += "\nimport ClaudeBridge as B\nresult = dict([(i, (gc.getPlayer(i).getName(), B.realName(i))) for i in range(gc.getMAX_CIV_PLAYERS()) if gc.getPlayer(i).isEverAlive()])"
+    else:
+        code += "\nimport ClaudeBridge as B\nresult = dict([(i, (gc.getPlayer(i).getName(), B.realName(i))) for i in %r])" % list(names)
     out = subprocess.run([os.path.join(HERE, "civ"), "py", code], capture_output=True, text=True,
                          env=dict(os.environ, CIV_DEV="1"), timeout=60).stdout
     pairs = dict((int(i), (a, b)) for i, a, b in re.findall(r"(\d+): \(u?'([^']*)', u?'([^']*)'\)", out))
