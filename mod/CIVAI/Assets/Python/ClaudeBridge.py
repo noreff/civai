@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 159
+BRIDGE_VERSION = 160
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1210,6 +1210,11 @@ def watchMove(u, target, attack):
 	cam.JustLookAtPlot(start)
 	cam.SetZoom(0.5)
 	g_camera["at"], g_camera["turn_news"] = now, True
+	# a long march: the camera drifts only its first few tiles (the unit walks about that far this turn)
+	dx, dy = target.getX() - start.getX(), target.getY() - start.getY()
+	far = max(abs(dx), abs(dy))
+	if far > 3:
+		target = gc.getMap().plot(start.getX() + dx * 3 / far, start.getY() + dy * 3 / far)
 	glide(start, target, 0.5, 0.48, EVENT_HOLD)
 	shotLabel([u.getOwner(), owner])
 
