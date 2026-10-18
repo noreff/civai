@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 132
+BRIDGE_VERSION = 133
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1453,13 +1453,38 @@ def aiUnitUpdate(gu, argsList):
 		writeEvent("unit_arrived", {"id": u.getID(), "unit": gc.getUnitInfo(u.getUnitType()).getType(),
 			"x": u.getX(), "y": u.getY()})
 	elif cl.get("busy"):
+		m = cl.get("mission")
 		cl["busy"] = False
 		cl["mission"] = None
 		saveClaims(claims)
-		writeEvent("unit_done", {"id": u.getID(), "unit": gc.getUnitInfo(u.getUnitType()).getType(),
-			"x": u.getX(), "y": u.getY()})
+		left = unfinishedBuild(u, m)
+		if left:
+			# the game stops a worker's job when hostile units come near (a human's workers stop the same way):
+			# the job is not done, and the progress made stays on the tile
+			writeEvent("job_interrupted", {"id": u.getID(), "unit": gc.getUnitInfo(u.getUnitType()).getType(),
+				"x": u.getX(), "y": u.getY(), "job": left,
+				"note": "the game stopped this job before it was finished, as it does when hostile units are near "
+				"(barbarians, animals or an enemy); the progress stays on the tile. Order it again when it is safe"})
+		else:
+			writeEvent("unit_done", {"id": u.getID(), "unit": gc.getUnitInfo(u.getUnitType()).getType(),
+				"x": u.getX(), "y": u.getY()})
 	g.pushMission(MissionTypes.MISSION_SKIP, -1, -1, 0, False, False, MissionAITypes.NO_MISSIONAI, u.plot(), u)
 	return 1
+
+def unfinishedBuild(u, mission):
+	# a worker's build order whose work isn't on the tile: "FARM, 300 of 500 done", else None
+	if not mission or int(mission[0]) != int(MissionTypes.MISSION_BUILD):
+		return None
+	b = int(mission[1])
+	pl = u.plot()
+	info = gc.getBuildInfo(b)
+	if info.getImprovement() >= 0 and pl.getImprovementType() == info.getImprovement():
+		return None
+	if info.getRoute() >= 0 and pl.getRouteType() >= info.getRoute():
+		return None
+	if pl.getBuildProgress(b) <= 0:
+		return None
+	return "%s, %d of %d done" % (info.getType()[len("BUILD_"):], pl.getBuildProgress(b), pl.getBuildTime(b))
 
 def waypoints(u, tx, ty, limit=6):
 	iTeam = u.getTeam()
