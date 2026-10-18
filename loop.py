@@ -1062,7 +1062,7 @@ def reasons_of(events):
         if k == "claude_wake":
             out.append("turn %s: %s" % (e.get("turn"), ", ".join(e.get("reasons", []))))
         elif k == "message_from_player":
-            out.append('%s wrote: "%s"' % (human_name(), e.get("text")))
+            out.append('%s wrote to %s: "%s"' % (human_name(), "you" if e.get("private") else "all", e.get("text")))
         elif k == "message_from_leader":
             out.append('%s wrote to %s: "%s"' % (e.get("from"), "you" if e.get("private") else "all", e.get("text")))
         else:

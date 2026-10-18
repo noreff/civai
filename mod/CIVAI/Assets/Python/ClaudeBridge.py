@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 171
+BRIDGE_VERSION = 172
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -970,6 +970,22 @@ def writeEvent(kind, d):
 	finally:
 		f.close()
 
+def humanAddressee(word):
+	# the leader a human's "@word" names: a prefix of any word of his leader name, civ name or screen (model) name
+	w = word.lower().strip(u",:.!?")
+	if not w:
+		return None
+	for i in range(gc.getMAX_CIV_PLAYERS()):
+		p = gc.getPlayer(i)
+		if not p.isEverAlive() or p.isHuman():
+			continue
+		names = [realName(i), p.getName(), p.getCivilizationShortDescription(0), p.getCivilizationAdjective(0)]
+		for n in names:
+			for token in (u"%s" % n).lower().replace(u"(", u" ").replace(u")", u" ").split():
+				if token.startswith(w):
+					return i
+	return None
+
 def recordEvent(tag, a):
 	if not gameReady():
 		return
@@ -984,6 +1000,16 @@ def recordEvent(tag, a):
 			text = text[text.index(u">") + 1:-len(u"</color>")]
 		if text.startswith(u"[") and u"]:" in text:
 			text = text[text.index(u"]:") + 2:].strip()
+		# "@name text": a private line from the human to one leader (by leader, civ or model name, a prefix is
+		# enough: @genghis, @mongol, @opus); the other seats never get it
+		private = False
+		if text.startswith(u"@"):
+			parts = text[1:].split(None, 1)
+			to = parts and humanAddressee(parts[0]) or None
+			if to is not None:
+				if to != iMe:
+					return
+				text, private = (len(parts) > 1 and parts[1] or u""), True
 		writeChat("player", text)
 		if text.strip().lower() == u"!go":
 			setReady("player")
@@ -992,7 +1018,7 @@ def recordEvent(tag, a):
 			human = humanPlayers()
 			answerOffer(text.strip(), human and human[0] or 0)
 		else:
-			writeEvent("message_from_player", {"text": text, "via": "chat"})
+			writeEvent("message_from_player", {"text": text, "via": "chat", "private": private})
 	elif tag == "BeginPlayerTurn":
 		# deals other leaders made with our civ during the turn that just ended
 		w = ("pre", a[1])
