@@ -244,7 +244,7 @@ def handle(cfg, d, st, events, chat, reasons):
     cmds_pos = os.path.getsize(cmds_path) if os.path.exists(cmds_path) else 0
     th_pos = os.path.getsize(thoughts_path) if os.path.exists(thoughts_path) else 0
     out, secs, meta = run_agent(cfg, prompt)
-    agent_cmds = lines_since(cmds_path, cmds_pos)
+    agent_cmds = [c for c in lines_since(cmds_path, cmds_pos) if c.get("by", "agent") == "agent"]   # not the director's
     # the human must never be stuck: if the agent forgot `civ ready` on a turn wake-up, say it for it
     gate = civ("gate")
     forced = False
