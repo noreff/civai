@@ -12,6 +12,6 @@
     "bypassPermissions"
   ],
   "timeout_minutes": 15,
-  "shadow": true,
-  "prompt": "v1"
+  "shadow": false,
+  "prompt": "v2"
 }
