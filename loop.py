@@ -44,12 +44,58 @@ BRIEF_EVENTS = 40           # v2: events since the last wake-up, the rest behind
 SHADOW = "_shadow"          # games/_shadow: the test copy a shadow run plays in (read-only to the game)
 
 
+SEAT = {}   # a game of several agents: this loop plays one seat (see seats.json, broker.py)
+
+
+def seat_setup(game, key):
+    """Play seat `key` of games/<game>/seats.json: its player number, its bridge files (claude_bridge/p<N>),
+    its memory folder (games/<game>/<key>), its model and harness; the agent runs sandboxed and reaches
+    the game only through the broker."""
+    global EVENTS, CHAT
+    conf = json.load(open(os.path.join(HERE, "games", game, "seats.json")))
+    seat = next(x for x in conf["seats"] if x["key"] == key)
+    SEAT.update(seat, game=game)
+    EVENTS = os.path.join(BRIDGE, "p%d" % seat["player"], "events.jsonl")
+    CHAT = os.path.join(BRIDGE, "p%d" % seat["player"], "chat.jsonl")
+    os.environ["CIV_PLAYER"] = str(seat["player"])          # the loop's own lookups act as this seat
+    os.environ["CIV_GAME"] = "%s/%s" % (game, key)
+
+
+def seat_dir():
+    return os.path.join(HERE, "games", SEAT["game"], SEAT["key"])
+
+
+def sandbox_profile():
+    """What a seat's agent may not touch: the game's raw files, the other seats, every transcript and note
+    that knows more than its civilization does. It reaches the game only through `civ` (the broker)."""
+    home = os.path.expanduser("~")
+    own = seat_dir()
+    claude_own = os.path.join(home, ".claude", "projects", own.replace("/", "-").replace(".", "-"))
+    deny = [os.path.join(home, "Library/Application Support/CrossOver"), os.path.join(HERE, "games"),
+            os.path.join(HERE, "paper"), os.path.join(HERE, "out"), os.path.join(HERE, "docs"),
+            os.path.join(home, ".claude", "projects"), os.path.join(home, ".codex"),
+            os.path.join(home, ".pi", "agent", "sessions"), os.path.join(home, "research"),
+            "/private/tmp/claude-501", "/tmp/claude-501"]
+    allow = [own, claude_own, CODEX_HOME]
+    q = lambda p: '(subpath "%s")' % os.path.realpath(p).replace('"', '\\"')
+    text = "(version 1)\n(allow default)\n(deny file-read* file-write* %s)\n(allow file-read* file-write* %s)\n" % (
+        " ".join(q(p) for p in deny), " ".join(q(p) for p in allow))
+    path = os.path.join(HERE, "run", "sandbox-%s.sb" % SEAT["key"])
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    open(path, "w").write(text)
+    return path
+
+
 def civ(*args):
     r = subprocess.run([os.path.join(HERE, "civ")] + list(args), capture_output=True, text=True, timeout=180)
     return (r.stdout + r.stderr).strip()
 
 
 def game_dir():
+    if SEAT:
+        d = seat_dir()
+        os.makedirs(os.path.join(d, "wakes"), exist_ok=True)
+        return "%s/%s" % (SEAT["game"], SEAT["key"]), d
     gid = open(os.path.join(HERE, "games", "CURRENT")).read().strip()
     d = os.path.join(HERE, "games", gid)
     os.makedirs(os.path.join(d, "wakes"), exist_ok=True)
@@ -283,7 +329,18 @@ def chat_lines(new_chat):
     rows = rows[-min(max(recent, BRIEF_CHAT_LINES), 2 * BRIEF_CHAT_LINES):]
     new_ids = set(json.dumps(c, sort_keys=True) for c in new_chat)
     return ["%sT%s %s: %s" % ("NEW " if json.dumps(c, sort_keys=True) in new_ids and c.get("from") != "claude" else "",
-            c.get("turn"), "you" if c.get("from") == "claude" else human_name(), c.get("text")) for c in rows]
+            c.get("turn"), speaker(c), c.get("text")) for c in rows]
+
+
+def speaker(c):
+    # who wrote a chat line, as this seat sees it; private lines say so
+    who = "you" if c.get("from") == "claude" else human_name() if c.get("from") == "player" else c.get("from")
+    to = c.get("to")
+    if to == "you":
+        return who + " (privately to you)"
+    if to and to != "all":
+        return who + " (privately to %s)" % to
+    return who + (" (to all)" if to == "all" else "")
 
 
 def raw(cmd):
@@ -409,7 +466,7 @@ def agent_command(cfg, system_file, resume):
         cmd = ["pi", "-p", "--mode", "json", "--provider", cfg.get("provider", "openrouter"), "--model",
                cfg["model"] + (":" + cfg["effort"] if cfg.get("effort") else ""),
                "--system-prompt", open(system_file).read(), "--tools", "read,bash,edit,write",
-               "--session-dir", os.path.join(HERE, "out", "pi-sessions")]
+               "--session-dir", os.path.join(seat_dir(), ".pi-sessions") if SEAT else os.path.join(HERE, "out", "pi-sessions")]
         return cmd + (["--session", resume] if resume else []), {}
     cmd = [a.replace("{prompt}", "") for a in cfg["agent"]]
     if resume:
@@ -467,10 +524,21 @@ def parse_output(h, stdout):
 
 def run_agent(cfg, prompt, resume=None, system_file=SYSTEM_FILE, extra_env=None):
     h = harness_of(cfg)
+    cwd = HERE
+    if SEAT:
+        # the seat's own copy of the system prompt: the sandbox lets the harness read only the seat's folder
+        own = os.path.join(seat_dir(), ".system_prompt.md")
+        open(own, "w").write(open(system_file).read())
+        system_file = own
     cmd, henv = agent_command(cfg, system_file, resume)
     stdin = None if any("{prompt}" in a for a in cfg["agent"]) and h not in ("codex", "pi") else prompt
     if stdin is None:
         cmd = [a.replace("{prompt}", prompt) for a in cfg["agent"]]
+    if SEAT:
+        cmd = ["sandbox-exec", "-f", sandbox_profile()] + cmd
+        cwd = seat_dir()
+        henv = dict(henv, CIV_BROKER=os.path.join(HERE, "run", "broker.sock"),
+                    CIV_TOKEN_FILE=os.path.join(seat_dir(), ".seat_token"))
     t0 = time.time()
     error, meta = None, {}
     try:
@@ -478,7 +546,7 @@ def run_agent(cfg, prompt, resume=None, system_file=SYSTEM_FILE, extra_env=None)
         env["CIV_ACTOR"] = "agent"   # marks the player's own commands in the logs
         env.update(henv)
         env.update(extra_env or {})
-        r = subprocess.run(cmd, input=stdin, capture_output=True, text=True, cwd=HERE, env=env,
+        r = subprocess.run(cmd, input=stdin, capture_output=True, text=True, cwd=cwd, env=env,
                            timeout=cfg.get("timeout_minutes", 15) * 60)
         try:
             out, meta, error = parse_output(h, r.stdout)
@@ -537,8 +605,7 @@ def check_prompt(cmds, added, final_words, now=None):
         "## The chat of the last %d turns (the game's record: you said only what is here; where anything you saw "
         "earlier disagrees, this record is right)" % CHECK_TURNS,
         "",
-        "\n".join("- T%s %s: %s" % (c["turn"], "you" if c.get("from") == "claude" else human_name(), c.get("text"))
-                  for c in chat) or "- (no messages)",
+        "\n".join("- T%s %s: %s" % (c["turn"], speaker(c), c.get("text")) for c in chat) or "- (no messages)",
         "",
         "## Everything else you did this wake-up (the game's log)",
         "",
@@ -718,6 +785,9 @@ def reasons_of(events):
 def main():
     cfg = json.load(open(os.path.join(HERE, "loop.json")))
     once, dry = "--once" in sys.argv, "--dry-run" in sys.argv
+    if "--seat" in sys.argv:
+        seat_setup(sys.argv[sys.argv.index("--game") + 1], sys.argv[sys.argv.index("--seat") + 1])
+        cfg = dict(cfg, prompt="v2", shadow=False, **{k: v for k, v in SEAT.items() if k not in ("key", "player", "game")})
     gid, d = game_dir()
     st = load_state(d)
     print("CIVAI loop on game %s (agent: %s)" % (gid, cfg["agent"][0]), flush=True)

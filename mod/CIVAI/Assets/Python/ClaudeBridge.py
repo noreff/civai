@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 65
+BRIDGE_VERSION = 66
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -932,6 +932,8 @@ def recordEvent(tag, a):
 			# fired before the game turn counter moves on: the player is about to play turn a[0] + 1
 			writeEvent("player_turn_begins", {"gate": readGate().get("on", False), "turn": a[0] + 1})
 			autoReadyOrWake(a[0] + 1)
+	elif tag == "BeginGameTurn" and seatsConfigured():
+		seatTurnStart(a[0])
 	elif tag == "firstContact" and iTeam in (a[0], a[1]):
 		other = a[1]
 		if other == iTeam:
@@ -3829,8 +3831,32 @@ def humanTurn():
 			return t
 	return t + 1
 
+def seatTurnStart(turn):
+	# a game of several agents: every agent plays every turn; the engine holds its civ's turn until it is ready
+	iMe = getClaudePlayer()
+	p = gc.getPlayer(iMe)
+	if not p.isAlive():
+		return
+	if hasattr(p, "setClaudeReady"):
+		p.setClaudeReady(False)
+	g = readGate()
+	reasons = list(g.get("attention") or []) + ["turn"]
+	g["on"] = True
+	g["ready_turn"] = -1
+	writeGate(g)
+	writeEvent("claude_wake", {"turn": turn, "reasons": reasons})
+
 def setReady(byWhom):
 	g = readGate()
+	if seatsConfigured():
+		g["ready_turn"] = gc.getGame().getGameTurn()
+		g["attention"] = []
+		writeGate(g)
+		p = gc.getPlayer(getClaudePlayer())
+		if hasattr(p, "setClaudeReady"):
+			p.setClaudeReady(True)   # the engine lets this civ's turn end
+		writeEvent("claude_ready", {"by": byWhom})
+		return
 	g["ready_turn"] = humanTurn()
 	g["attention"] = []
 	writeGate(g)
@@ -3940,6 +3966,9 @@ def cannotDoControlTrampoline(argsList):
 
 def cmdReady(args):
 	setReady("claude")
+	if seatsConfigured():
+		CyInterface().addImmediateMessage(u"%s is done with this turn." % gc.getPlayer(getClaudePlayer()).getName(), "")
+		return {"ready_turn": readGate()["ready_turn"]}
 	CyInterface().addImmediateMessage(u"%s has finished thinking. You may end the turn." %
 		gc.getPlayer(getClaudePlayer()).getName(), "")
 	return {"ready_turn": readGate()["ready_turn"]}
