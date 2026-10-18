@@ -853,6 +853,12 @@ def handle(cfg, d, st, events, chat, reasons):
             f.write(system)
     else:
         prompt = prompt_for(d, events, chat, reasons)
+    cut = st.get("cut_off") or {}
+    if cut.get("turn") == start_turn and cut.get("cmds"):
+        # an earlier wake-up this turn was stopped midway (the model's service refused it): what it already did stands
+        prompt += "\n\n## Already done this turn\n\nYour last wake-up this turn was stopped midway by the model's " \
+                  "service, after these orders and messages had gone through. They stand; don't repeat them:\n\n" + \
+                  "\n".join("- `civ %s`" % c for c in cut["cmds"])
     sysf = SYSTEM_FILE_V2 if v2 else SYSTEM_FILE
     if start_turn < 10 ** 6:
         turn = start_turn    # the game's own clock (the brief can quote other turns, e.g. in a message)
@@ -879,6 +885,13 @@ def handle(cfg, d, st, events, chat, reasons):
     if v2 and not error:
         archive_inbox(d)
     agent_cmds = [c for c in lines_since(cmds_path, cmds_pos) if c.get("by", "agent") == "agent"]   # not the director's
+    if error and refused(error):
+        done = [c["cmd"] for c in agent_cmds if c.get("cmd", "").split(" ")[0] not in LOOKUPS]
+        if cut.get("turn") == start_turn:
+            done = cut.get("cmds", []) + done
+        st["cut_off"] = {"turn": start_turn, "cmds": done[-60:]}
+    elif not error:
+        st.pop("cut_off", None)
     check = None
     added = memory_added(d)
     if not error and meta.get("session_id") and (added or any(c.get("cmd", "").startswith("say") for c in agent_cmds)):
