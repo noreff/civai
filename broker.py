@@ -54,7 +54,8 @@ def run_civ(seat, argv):
     r = subprocess.run([os.path.join(HERE, "civ")] + argv, capture_output=True, text=True, env=env, timeout=300)
     # every call and how it ended, for the record (outside the seats' folders: no seat reads it)
     err = (r.stderr.strip() or (r.stdout.strip() if r.stdout.lstrip().startswith("ERROR") else "")).splitlines()
-    row = {"wall": time.strftime("%Y-%m-%d %H:%M:%S"), "seat": seat["key"], "argv": " ".join(argv)[:300],
+    row = {"wall": time.strftime("%Y-%m-%d %H:%M:%S"), "t": round(t0, 3), "seat": seat["key"], "argv": " ".join(argv)[:300],
+           "args": argv,   # the exact arguments (a replay needs them; the joined line can't be split back)
            "code": r.returncode, "error": err[0][:300] if err else None, "seconds": round(time.time() - t0, 2)}
     with open(os.path.join(HERE, "games", seat["game"], "calls.jsonl"), "a") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -136,6 +137,26 @@ def turn_name(name, years):
     return "T%03d_%s" % (years[year], name) if year in years else name
 
 
+import shutil
+
+
+def keep_bridge_state(save):
+    # what the save doesn't hold: each seat's unit orders, city build lists, open proposals and offers (the
+    # bridge's p<N>/*.json), as they were when the turn began; a replay of the turn restores them with the save
+    bridge = os.path.join(AUTOSAVES.split("/drive_c/")[0], "drive_c", "claude_bridge")
+    base = os.path.basename(save)
+    if not (base.startswith("T") and base[1:4].isdigit()):
+        return   # only saves whose turn is known (T###_...): replay.py finds them as saves/T###_bridge
+    dest = os.path.join(os.path.dirname(save), base[:4] + "_bridge")
+    for seat in os.listdir(bridge):
+        d = os.path.join(bridge, seat)
+        if seat.startswith("p") and os.path.isdir(d):
+            os.makedirs(os.path.join(dest, seat), exist_ok=True)
+            for f in os.listdir(d):
+                if f.endswith(".json"):
+                    shutil.copy2(os.path.join(d, f), os.path.join(dest, seat, f))
+
+
 def keep_saves(game):
     # the game keeps only its last few autosaves: copy each one into the game's folder as it appears,
     # so every turn can be loaded again later (replays, re-recording the map for the video)
@@ -151,6 +172,7 @@ def keep_saves(game):
                 if name.endswith(".CivBeyondSwordSave") and time.time() - os.path.getmtime(src) > 5 and (
                         not os.path.exists(dst) or os.path.getmtime(src) > os.path.getmtime(dst)):
                     shutil.copy2(src, dst)
+                    keep_bridge_state(dst)
         except OSError:
             pass
         time.sleep(10)
