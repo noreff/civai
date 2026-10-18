@@ -366,7 +366,8 @@ def cmd_events(argv):
 
 def video_log(name, record):
     os.makedirs(VIDEO_LOG_DIR, exist_ok=True)
-    record = dict(record, wall=time.strftime("%Y-%m-%d %H:%M:%S"))
+    # "by": who ran it (the loop sets CIV_ACTOR=agent for the player; anything else is the director or a person)
+    record = dict(record, wall=time.strftime("%Y-%m-%d %H:%M:%S"), by=os.environ.get("CIV_ACTOR", "director"))
     with open(os.path.join(VIDEO_LOG_DIR, name), "a") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -539,7 +540,14 @@ def main(argv):
             print(fmt_record(call("release", {"id": argv[1] if argv[1] == "all" else int(argv[1])})))
         elif cmd == "say":
             popup = len(argv) > 1 and argv[1] == "--popup"
-            call("say", {"text": " ".join(argv[2 if popup else 1:]), "popup": popup})
+            text = " ".join(argv[2 if popup else 1:])
+            call("say", {"text": text, "popup": popup})
+            # pair the message with the thought written just before it (playbook: think, then say)
+            last = os.path.join(VIDEO_LOG_DIR, ".last_thought")
+            tid = open(last).read().strip() if os.path.exists(last) else None
+            if tid:
+                os.remove(last)
+            video_log("said.jsonl", {"text": text, "thought_id": tid})
             print("shown in game")
         elif cmd == "chat":
             n = int(argv[1]) if len(argv) > 1 else 20
@@ -561,7 +569,10 @@ def main(argv):
                 rows = [json.loads(l) for l in open(path)] if os.path.exists(path) else []
                 print("\n".join("%s  %s" % (r["wall"], r["text"]) for r in rows[-10:]) or "(nothing sent yet)")
         elif cmd == "think":
-            video_log("thoughts.jsonl", {"text": " ".join(argv[1:])})
+            tid = uuid.uuid4().hex[:10]
+            video_log("thoughts.jsonl", {"id": tid, "text": " ".join(argv[1:])})
+            with open(os.path.join(VIDEO_LOG_DIR, ".last_thought"), "w") as f:
+                f.write(tid)   # the next `civ say` is paired with this thought
             print("noted")
         elif cmd == "events":
             cmd_events(argv[1:])

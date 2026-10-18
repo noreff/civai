@@ -202,18 +202,28 @@ def prompt_for(d, events, chat, reasons):
 
 def run_agent(cfg, prompt):
     cmd = [a.replace("{prompt}", prompt) for a in cfg["agent"]]
+    meta = {}
     if cmd and os.path.basename(cmd[0]) == "claude":
-        cmd += ["--append-system-prompt-file", SYSTEM_FILE]
+        cmd += ["--append-system-prompt-file", SYSTEM_FILE, "--output-format", "json"]
     stdin = None if any("{prompt}" in a for a in cfg["agent"]) else prompt
     t0 = time.time()
     try:
         env = {k: v for k, v in os.environ.items() if not k.startswith("CIV_") or k in ("CIV_BOTTLE", "CIV_GAME")}
+        env["CIV_ACTOR"] = "agent"   # marks the player's own commands in the logs
         r = subprocess.run(cmd, input=stdin, capture_output=True, text=True, cwd=HERE, env=env,
                            timeout=cfg.get("timeout_minutes", 15) * 60)
         out = r.stdout.strip() or r.stderr.strip()
+        if out.startswith("{"):
+            # the json result: the final words plus what the wake-up cost and which model ran it
+            try:
+                data = json.loads(out)
+                out = data.get("result") or ""
+                meta = {k: data.get(k) for k in ("session_id", "total_cost_usd", "num_turns", "duration_ms", "usage", "modelUsage")}
+            except ValueError:
+                pass
     except subprocess.TimeoutExpired:
         out = "(timed out)"
-    return out, time.time() - t0
+    return out, time.time() - t0, meta
 
 
 def lines_since(path, pos):
@@ -231,7 +241,7 @@ def handle(cfg, d, st, events, chat, reasons):
         turn = m.group(1)
     cmds_pos = os.path.getsize(cmds_path) if os.path.exists(cmds_path) else 0
     th_pos = os.path.getsize(thoughts_path) if os.path.exists(thoughts_path) else 0
-    out, secs = run_agent(cfg, prompt)
+    out, secs, meta = run_agent(cfg, prompt)
     agent_cmds = lines_since(cmds_path, cmds_pos)
     # the human must never be stuck: if the agent forgot `civ ready` on a turn wake-up, say it for it
     gate = civ("gate")
@@ -250,8 +260,24 @@ def handle(cfg, d, st, events, chat, reasons):
             "_%.0f s, prompt ~%d tokens%s_" % (secs, len(prompt) // 4, ", ready said by the loop" if forced else "")]
     name = "T%s-%s.md" % (str(turn).zfill(3), time.strftime("%H%M%S"))
     open(os.path.join(d, "wakes", name), "w").write("\n".join(log))
+    with open(os.path.join(d, "wake_stats.jsonl"), "a") as f:
+        f.write(json.dumps(dict(meta, wake=st["wakes"], turn=turn, file=name, seconds=round(secs, 1), reasons=reasons,
+                                forced_ready=forced, wall=time.strftime("%Y-%m-%d %H:%M:%S")), ensure_ascii=False) + "\n")
+    snapshot_memory(d, "wake %d, turn %s" % (st["wakes"], turn))
     print(time.strftime("%H:%M:%S"), "wake-up done:", "; ".join(reasons), "(%.0f s)%s" % (secs, " +forced ready" if forced else ""),
           flush=True)
+
+
+def snapshot_memory(d, message):
+    # the game folder as a git history: every wake-up's memory files can be read back later
+    try:
+        if not os.path.isdir(os.path.join(d, ".git")):
+            subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=d, check=True)
+        subprocess.run(["git", "-c", "user.name=civai-loop", "-c", "user.email=civai@localhost", "commit", "-q",
+                        "--allow-empty", "-m", message], cwd=d, check=True, capture_output=True)
+    except (OSError, subprocess.CalledProcessError) as e:
+        print("memory snapshot failed:", e, flush=True)
 
 
 def reasons_of(events):
