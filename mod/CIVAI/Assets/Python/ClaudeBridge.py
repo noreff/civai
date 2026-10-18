@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 100
+BRIDGE_VERSION = 101
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -4262,15 +4262,23 @@ def cmdBuild(args):
 		"turns": c.getProductionTurnsLeft()}
 
 
-def hurryCivics(have):
-	# the hurry kinds we can't use now, and the civics that allow them (the game's rule)
+def hurryCivics(have, c=None):
+	# the hurry kinds we can't use now, and why: a civic we don't have, or the price, or the city's state
 	out = []
+	p = gc.getPlayer(getClaudePlayer())
 	for h in range(gc.getNumHurryInfos()):
 		if h in have:
 			continue
-		civics = [gc.getCivicInfo(k).getDescription() for k in range(gc.getNumCivicInfos()) if gc.getCivicInfo(k).isHurry(h)]
 		name = gc.getHurryInfo(h).getType()[len("HURRY_"):].lower()
-		out.append("%s: %s" % (name, civics and "needs the civic " + " or ".join(civics) or "not possible for this build"))
+		if not p.canHurry(h):
+			civics = [gc.getCivicInfo(k).getDescription() for k in range(gc.getNumCivicInfos()) if gc.getCivicInfo(k).isHurry(h)]
+			out.append("%s: %s" % (name, civics and "needs the civic " + " or ".join(civics) or "not possible"))
+		elif c is not None and c.hurryGold(h) > p.getGold():
+			out.append("%s: costs %d gold, we have %d" % (name, c.hurryGold(h), p.getGold()))
+		elif c is not None and c.isDisorder():
+			out.append("%s: not while the city is in disorder" % name)
+		else:
+			out.append("%s: our civics allow it, but not for this build or this turn (the game's rule)" % name)
 	return out or ["-"]
 
 def cmdHurry(args):
@@ -4293,7 +4301,7 @@ def cmdHurry(args):
 		return {"city": c.getName(), "building": building, "turns_left": c.getProductionTurnsLeft(),
 			"can_hurry": ["%s: costs %d population and %d gold, unhappiness for %d turns" % (n, pop, gold, anger)
 				for (n, h, pop, gold, anger) in opts] or ["no"],
-			"other_ways": hurryCivics([o[1] for o in opts])}
+			"other_ways": hurryCivics([o[1] for o in opts], c)}
 	want = args["how"].lower()
 	m = [o for o in opts if o[0] == want or (want == "whip" and o[2] > 0) or (want in ("buy", "gold") and o[2] == 0 and o[3] > 0)]
 	if not m:
