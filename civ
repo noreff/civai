@@ -91,6 +91,8 @@
   civ hold                 take "ready" back: the player must wait for the next `civ ready`
   civ say "<text>"         chat line to the player in the game, from you
   civ say --popup "<text>" the same as a popup window
+  civ votes                the Voting screen: Apostolic Palace / United Nations, Resident, members, votes,
+                           turns to the next resolution and the next Resident election
   civ work <city> [X Y | <specialist> +N|-N | auto]   which tiles the citizens work (a human's clicks on the
                            city screen): no more words shows them; X Y takes or frees a tile; auto: the governor
   civ say --think "<thought>" "<text>"   the thought behind it and the message, in one call
@@ -635,6 +637,8 @@ def main(argv):
             words = [a for a in argv[1:] if not a.startswith("--")]
             args = {"tech": " ".join(words), "queue": "--queue" in argv} if words else {}
             print(fmt_record(call("research", args)))
+        elif cmd == "votes":
+            print(fmt_record(call("votes")))
         elif cmd == "work":
             print(fmt_record(call("work", {"words": [a for a in argv[1:]]})))
         elif cmd == "build":

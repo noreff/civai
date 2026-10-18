@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 95
+BRIDGE_VERSION = 98
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1060,6 +1060,10 @@ def recordEvent(tag, a):
 	elif tag == "claudeFreeTech":
 		if engineArgs(a)[0] == iMe:
 			newChoice("free_tech", 0, "Oracle, a first-to-discover bonus or the like", [])
+	elif tag == "claudeElection":
+		me, selId, source, options = engineArgs(a)
+		if me == iMe:
+			newElection(me, selId, source, u"%s" % options)
 	elif tag == "claudeVote":
 		me, voteId, source, vote, player, cityId, other, text = engineArgs(a)
 		if me == iMe:
@@ -3286,6 +3290,9 @@ TRADES = ("offer_deal", "offer_peace", "offer_city", "offer_vassal", "give_help"
 def proposalText(v):
 	if v["comment"] == "vote":
 		return voteText(v)
+	if v["comment"] == "election":
+		return "As Resident of %s you choose the resolution put to the vote: %s" % (v["source"],
+			"; ".join(["%d: %s" % (k + 1, x) for k, x in enumerate(v["options"])]))
 	if v["comment"] in ("event", "free_tech"):
 		return choiceText(v)
 	who = pname(v["from"])
@@ -3530,6 +3537,14 @@ def expireProposals():
 					del o["open"][k]
 					saveProposals(o)
 			continue
+		if v["comment"] == "election":
+			if v["turn"] < now - 1:
+				try:
+					answerElection(o, k, v, None)
+				except:
+					del o["open"][k]
+					saveProposals(o)
+			continue
 		if v["comment"] == "vote":
 			if v["turn"] < now - 2:   # counted by now; a late vote would not count
 				del o["open"][k]
@@ -3546,10 +3561,47 @@ def cmdProposals(args):
 	return {"open": ["#%s (turn %d): %s" % (k, v["turn"], proposalText(v)) for k, v in o["open"].items()] or ["none"],
 		"answer": "civ answer N yes|no"}
 
+def newElection(me, selId, source, options):
+	# the agent Resident picks the resolution (the engine waits for CyGame.claudeChooseElection)
+	o = loadProposals()
+	for k, v in o["open"].items():
+		if v["comment"] == "election" and v["data"] == selId:
+			return
+	v = {"from": me, "comment": "election", "data": selId, "gives": [], "wants": [], "turn": gc.getGame().getGameTurn(),
+		"source": gc.getVoteSourceInfo(source).getDescription(),
+		"options": [re.sub(u"<[^>]*>", u"", x).strip() for x in options.split(u"\n") if x.strip()]}
+	n = o["next"]
+	o["next"] = n + 1
+	o["open"][str(n)] = v
+	saveProposals(o)
+	writeEvent("proposal", {"id": n, "text": proposalText(v),
+		"answer": "civ answer %d <option number> (open until the end of next turn; then the game picks)" % n})
+
+def answerElection(o, n, v, a):
+	if a is None:
+		i = -1   # no answer in time: the pick the game itself would make
+	else:
+		try:
+			i = int(str(a).strip().lstrip("#")) - 1
+		except ValueError:
+			raise Exception("answer with the option's number, 1 to %d" % len(v["options"]))
+		if i < 0 or i >= len(v["options"]):
+			raise Exception("answer with the option's number, 1 to %d" % len(v["options"]))
+	if not gc.getGame().claudeChooseElection(v["data"], i):
+		raise Exception("the game no longer has this election open")
+	del o["open"][str(n)]
+	what = i >= 0 and v["options"][i] or "the game's own pick (no answer in time)"
+	closeNote(o, n, "resolution chosen: %s" % what)
+	saveProposals(o)
+	writeEvent("proposal_answered", {"id": int(n), "answer": a, "what": proposalText(v), "result": ["put to the vote: " + what]})
+	return {"id": int(n), "put_to_the_vote": what}
+
 def cmdAnswer(args):
 	n = str(args["id"]).lstrip("#")
 	a = args["answer"]
 	v = loadProposals()["open"].get(n)
+	if v is not None and v["comment"] == "election":
+		return answerElection(loadProposals(), n, v, a)
 	if v is not None and v["comment"] == "vote":
 		return answerProposal(n, True, a)
 	if v is not None and v["comment"] in ("event", "free_tech"):
@@ -4109,6 +4161,40 @@ def cmdWork(args):
 	c.alterSpecialistCount(s, n)
 	return workView(c)
 
+def cmdVotes(args):
+	# the Voting screen: each diplomatic body (Apostolic Palace, United Nations), its Resident, members and votes
+	iMe, iTeam = myIds()
+	g = gc.getGame()
+	out = {}
+	for vs in range(gc.getNumVoteSourceInfos()):
+		name = gc.getVoteSourceInfo(vs).getDescription()
+		if not g.isDiploVote(vs):
+			out[name] = "not founded yet (its wonder hasn't been built)"
+			continue
+		sec = g.getSecretaryGeneral(vs)
+		resident = [pname(i) for i in range(gc.getMAX_CIV_PLAYERS()) if gc.getPlayer(i).isAlive() and gc.getPlayer(i).getTeam() == sec]
+		members = []
+		for i in range(gc.getMAX_CIV_PLAYERS()):
+			p = gc.getPlayer(i)
+			if not p.isAlive() or p.isBarbarian() or not (i == iMe or gc.getTeam(iTeam).isHasMet(p.getTeam())):
+				continue
+			if p.isVotingMember(vs):
+				try:
+					v = p.getVotes(-1, vs)
+				except:
+					v = "?"
+				kind = " (votes only, not a full member)"
+				if p.isFullMember(vs):
+					kind = " (full member)"
+				members.append("%s%s: %s votes" % (pname(i), kind, v))
+		rel = g.getVoteSourceReligion(vs)
+		out[name] = {"religion": rel >= 0 and gc.getReligionInfo(rel).getDescription() or "-",
+			"resident": ", ".join(resident) or "none yet",
+			"members (leaders you know)": members or ["none"],
+			"next resolution in turns": g.getVoteTimer(vs),
+			"next Resident election in turns": g.getSecretaryGeneralTimer(vs)}
+	return out
+
 def cmdBuild(args):
 	# what a city of ours builds: replace the current item (default), queue=true to add at the end,
 	# first=true to put it in front; check=true only tells whether it is possible
@@ -4559,6 +4645,7 @@ COMMANDS = {
 	"do": cmdDo,
 	"build": cmdBuild,
 	"work": cmdWork,
+	"votes": cmdVotes,
 	"hurry": cmdHurry,
 	"ping": cmdPing,
 	"status": cmdStatus,

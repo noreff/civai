@@ -86,7 +86,7 @@ The `civ` tool is `~/civai/civ`. `civ help` lists every command. Start a game se
 ## Tool sheet
 
 Looking:
-- `civ status`, `civ city <name>`, `civ card <city>` (the ground for an attack on it), `civ player <name>`, `civ relations`, `civ victory`, `civ deals`, `civ events N`, `civ chat N`.
+- `civ status`, `civ city <name>`, `civ card <city>` (the ground for an attack on it), `civ player <name>`, `civ relations`, `civ victory`, `civ votes` (the Apostolic Palace / United Nations: Resident, members, votes, timers), `civ deals`, `civ events N`, `civ chat N`.
 - The land: `civ around X Y` (a tile and its 8 neighbours), `civ tile X Y`, `civ area X Y [R]` (the best city sites the game rates), `civ where X Y`. Coordinates: x grows to the east, y grows to the NORTH. Look at the land before land decisions (city sites, borders, wars); check facts against the game, not your notes.
 - `civ odds X Y [unit id]`: attack odds against the best defender there. Before every attack.
 - `civ build <city>` (no item): what it builds and can build. `civ actions <unit id>`: what a unit can do right now.
@@ -98,7 +98,7 @@ Ordering:
 - `civ move <id> X Y [--stack]` (the unit alone, or its whole stack); `civ do <id> <action> [X Y] [--queue]` (FOUND, FORTIFY, BUILD_FARM, PROMOTE_..., UPGRADE_..., LEAD <unit id> for a Great General...). Units and cities you haven't given orders to are run by the game's automation; an order makes them yours; `civ release <id>` hands one back. A unit you gave a job wakes you when it's done (`unit_done`).
 - `civ budget research 70 gold 30`; `civ religion <name>`; `civ civics <civic>...` (the normal anarchy applies); `civ raze <city>` on the turn you take it or the next (otherwise a taken city is kept).
 - Deals: `civ offer <player> --give ... --get ...` (an AI answers at once by its own judgment), `civ give <player> ...`, `civ war <player>`, `civ cancel <deal#|player>` (allowed 10 turns after signing; they remember). Items: `tech:<name>`, `gold:<n>`, `gold_per_turn:<n>`, `resource:<name>`, `city:<name>`, `map`, `open_borders`, `defensive_pact`, `permanent_alliance`, `peace`, `war:<player>`, `peace_with:<player>`, `embargo:<player>`, `civic:<name>`, `religion:<name>`. The game's rules decide what can be traded (`civ tradeable <player>`).
-- Answers: `civ proposals`, then `civ answer N yes|no` (a vote: yes/no/abstain or a leader's name; an event: the option number; a free tech: its name). No answer by the end of the next turn counts as no.
+- Answers: `civ proposals`, then `civ answer N yes|no` (a vote: yes/no/abstain or a leader's name; an event: the option number; a free tech: its name; as Resident of the Apostolic Palace or the UN, the number of the resolution you put to the vote). No answer by the end of the next turn counts as no.
 - `civ say [--to <leader>] [--think "..."] "..."`, `civ think "..."`, `civ director "..."`.
 
 Events you will see: `message_from_leader` (another leader wrote to you or to all), `proposal` (something waits for your answer), `deal_done` / `deal_declined` / `deal_failed`, `first_contact`, `war_declared` / `peace_made`, `city_changed_hands`, `unit_waiting` (a settler or great person waits for orders), `unit_done`, `improvement_built` (a farm, mine, road... finished on your land), `city_queue_done` (a city's build list ran out), `treasury_empty` (research stalls and unpaid units desert), `unit_disbanded`, `rewind` (an older save was loaded: what came after it never happened).
