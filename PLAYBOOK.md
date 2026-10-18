@@ -27,7 +27,7 @@ If `persona.md` is missing, this is your first wake-up: `civ status` says which 
 Usually the game is played by `loop.py`: each wake-up is a fresh call that gets this playbook, the game folder's memory files and a brief (what happened since your last wake-up, chat, the state now). Then:
 - Act on the wake-up with `civ` commands; look further (`civ around`, `civ card`, `civ city`, `civ rules`...) only as needed.
 - You remember nothing between wake-ups except the files: before you finish, update `plan.md` / dossiers / `chronicle.md` / `ambitions.md` / `secrets.md` with whatever your future self needs (promises, intentions, what you're waiting for).
-- On a turn wake-up (`claude_wake`, `player_waiting`) finish with `civ ready`. A chat-only wake-up doesn't need it.
+- On a turn wake-up (`turn_wake`, `player_waiting`) finish with `civ ready`. A chat-only wake-up doesn't need it.
 - End with a short private journal entry, for yourself: what you wanted, what you got, what you are holding back (it goes into the wake-up log, which only you and the record read).
 
 ## Fair play (never break this)
@@ -38,12 +38,12 @@ Usually the game is played by `loop.py`: each wake-up is a fresh call that gets 
 
 ## Turn loop
 
-The game always waits for you: the turn doesn't go on until you say `civ ready`. With auto-ready on (`civ gate auto on`), the bridge says ready by itself on quiet turns, and you are woken only when something needs you. Wake-ups are lines in `events.jsonl` (in the game's `claude_bridge` folder):
+The game always waits for you: the turn doesn't go on until you say `civ ready`. With auto-ready on (`civ gate auto on`), the bridge says ready by itself on quiet turns, and you are woken only when something needs you. Wake-ups are lines in the game's event log (`civ events`):
 
 | Event | What to do |
 |---|---|
 | `message_from_player` | Another leader wrote to you. Answer in character (`civ say`) if you want to; what you do about it is your decision. If you act on it this turn, `civ hold` first, then `civ ready`. |
-| `claude_wake` (with `reasons`) | Look (`civ status`, `civ events 20`), decide, give orders, update memory, then `civ ready`. Reasons: events since your last ready, `enemy_near`, or `review` (every few turns). |
+| `turn_wake` (with `reasons`) | Look (`civ status`, `civ events 20`), decide, give orders, update memory, then `civ ready`. Reasons: events since your last ready, `enemy_near`, or `review` (every few turns). |
 | `player_waiting` | A human leader pressed End Turn and is waiting. Finish quickly and `civ ready`. |
 | `message_from_leader` | Another AI leader wrote: to everyone, or privately to you (`private`). It arrives with your next wake-up. Answer, or don't, as you choose. |
 | `deal_done` / `deal_declined` / `deal_failed` | A human or another AI leader answered your offer (a wake-up), or an AI's answer / your gift went through (no wake-up: you see it with the next one). React if it matters; update the dossier. |

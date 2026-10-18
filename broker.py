@@ -58,7 +58,18 @@ def run_civ(seat, argv):
            "code": r.returncode, "error": err[0][:300] if err else None, "seconds": round(time.time() - t0, 2)}
     with open(os.path.join(HERE, "games", seat["game"], "calls.jsonl"), "a") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
-    return {"out": r.stdout, "err": r.stderr, "code": r.returncode}
+    return {"out": neutral(r.stdout), "err": neutral(r.stderr), "code": r.returncode}
+
+
+# the bridge's internal names (it began as Claude's): a seat reads neutral ones, whichever model it is
+NEUTRAL = (("claude_wake", "turn_wake"), ("claude_ready", "turn_ready"), ("claude_bridge", "bridge"),
+           ("ClaudeBridge", "Bridge"))
+
+
+def neutral(text):
+    for a, b in NEUTRAL:
+        text = text.replace(a, b)
+    return text
 
 
 def serve(game):

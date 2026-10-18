@@ -534,6 +534,7 @@ def agent_command(cfg, system_file, resume):
             cmd += ["-m", cfg["model"]]
         if cfg.get("effort"):
             cmd += ["-c", "model_reasoning_effort=" + cfg["effort"]]
+        cmd += ["-c", "model_reasoning_summary=detailed"]   # the reasoning summaries, kept in the raw output
         return cmd + ["-"], {"CODEX_HOME": codex_home()}
     if h == "pi":
         cmd = ["pi", "-p", "--mode", "json", "--provider", cfg.get("provider", "openrouter"), "--model",
@@ -621,6 +622,8 @@ def run_agent(cfg, prompt, resume=None, system_file=SYSTEM_FILE, extra_env=None)
         env.update(extra_env or {})
         r = subprocess.run(cmd, input=stdin, capture_output=True, text=True, cwd=cwd, env=env,
                            timeout=cfg.get("timeout_minutes", 15) * 60)
+        if SEAT:
+            save_raw(prompt, r, resume)
         try:
             out, meta, error = parse_output(h, r.stdout)
         except (ValueError, KeyError, TypeError) as e:
@@ -635,6 +638,18 @@ def run_agent(cfg, prompt, resume=None, system_file=SYSTEM_FILE, extra_env=None)
         out = error = "could not start the agent: %s" % e
     meta["harness"] = h
     return out, time.time() - t0, meta, error
+
+
+def save_raw(prompt, r, resume):
+    # the whole prompt and the harness's whole output of every call (with whatever reasoning text the provider
+    # returns), for the record; next to the seats' folders, not in one, so no model reads it
+    d = os.path.join(os.path.dirname(seat_dir()), "raw", SEAT["key"])
+    os.makedirs(d, exist_ok=True)
+    stem = os.path.join(d, time.strftime("%Y%m%d-%H%M%S") + ("-check" if resume else ""))
+    for ext, text in ((".prompt.md", prompt), (".out.jsonl", r.stdout), (".err.txt", r.stderr)):
+        if text:
+            with open(stem + ext, "w") as f:
+                f.write(text)
 
 
 LOOKUPS = {"ping", "status", "map", "tile", "odds", "city", "unit", "player", "actions", "offers", "proposals",

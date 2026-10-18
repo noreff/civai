@@ -4,6 +4,7 @@
   multi.py <game-id> config     write the bridge's config.txt for this game's seats (before or after loading it)
   multi.py <game-id> start      start the broker and every seat's loop (logs in games/<id>/<seat>/loop.log)
   multi.py <game-id> stop       stop them
+  multi.py <game-id> restart    restart the broker, then each seat's loop once it is between wake-ups (new code)
   multi.py <game-id> status     who is running, each seat's last wake-up
 
 games/<id>/seats.json:
@@ -106,6 +107,39 @@ def stop(game):
             print("stopped", name)
 
 
+def busy(path):
+    # a seat's loop is in a wake-up while its agent (a child process) runs
+    try:
+        return subprocess.run(["pgrep", "-P", open(path).read().strip()], capture_output=True).returncode == 0
+    except OSError:
+        return False
+
+
+def restart(game):
+    # the broker at once (seats mid-wake get a short "not reachable"); each seat only between wake-ups:
+    # a restart mid-wake would throw away that turn's work
+    manifest(game)
+    if alive(pidfile(game, "broker")):
+        os.killpg(int(open(pidfile(game, "broker")).read()), signal.SIGTERM)
+        time.sleep(1)
+    spawn(game, "broker", [sys.executable, os.path.join(HERE, "broker.py"), game], os.path.join(HERE, "games", game, "broker.log"))
+    todo = [s for s in seats(game)]
+    while todo:
+        for s in list(todo):
+            path = pidfile(game, s["key"])
+            if alive(path) and busy(path):
+                continue
+            if alive(path):
+                os.killpg(int(open(path).read()), signal.SIGTERM)
+                time.sleep(1)
+            d = os.path.join(HERE, "games", game, s["key"])
+            pid = spawn(game, s["key"], [sys.executable, os.path.join(HERE, "loop.py"), "--game", game, "--seat", s["key"]],
+                        os.path.join(d, "loop.log"))
+            print("seat %s restarted: pid %d" % (s["key"], pid), flush=True)
+            todo.remove(s)
+        time.sleep(5)
+
+
 def status(game):
     for s in seats(game):
         d = os.path.join(HERE, "games", game, s["key"])
@@ -117,4 +151,4 @@ def status(game):
 
 if __name__ == "__main__":
     game, what = sys.argv[1], sys.argv[2]
-    {"config": config, "start": start, "stop": stop, "status": status}[what](game)
+    {"config": config, "start": start, "stop": stop, "restart": restart, "status": status}[what](game)
