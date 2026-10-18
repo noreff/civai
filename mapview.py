@@ -286,23 +286,52 @@ def military(us, owner):
     return [u for u in us if u[2] == owner and not any(w in u[3] for w in CIVILIAN)]
 
 
+def field_stacks():
+    # our armies outside our own cities: 2+ military units, or any siege/mounted unit
+    cities = set(my_cities())
+    return [xy for xy, us in UNITS.items() if xy not in cities and military(us, ME)
+            and (sum(u[4] for u in military(us, ME)) >= 2 or any(w in u[3] for u in military(us, ME) for w in ("CATAPULT", "KESHIK", "TREBUCHET")))]
+
+
 def hot_spots():
-    """Places that matter this turn: enemy cities at war, foreign armies near our land, our armies in the field."""
+    """Places that matter this turn, by distance from what is ours (never by plans): enemy cities close to our
+    units or land, foreign armies by our land, our armies in the field."""
     spots = []
     mine_land = {xy for xy, p in PLOTS.items() if p[6] == ME}
-    cities = set(my_cities())
-    field = [xy for xy, us in UNITS.items() if xy not in cities and military(us, ME)
-             and (sum(u[4] for u in military(us, ME)) >= 2 or any(w in u[3] for u in military(us, ME) for w in ("CATAPULT", "KESHIK", "TREBUCHET")))]
+    ours = [xy for xy, us in UNITS.items() if military(us, ME)]
     for xy, c in CITIES.items():
-        if c["owner"] != ME and at_war(c["owner"]) and (not cities or min(dist(xy, m) for m in cities) <= 12):
+        if c["owner"] != ME and at_war(c["owner"]) and (
+                any(dist(xy, u) <= 4 for u in ours) or any(dist(xy, t) <= 3 for t in mine_land)):
             spots.append((xy, "enemy city"))
     for xy, us in UNITS.items():
         foreign = [u for o in {u[2] for u in us if u[2] != ME} for u in military(us, o)]
         if foreign and xy not in CITIES and any((xy[0] + dx, xy[1] + dy) in mine_land for dx in range(-2, 3) for dy in range(-2, 3)):
             spots.append((xy, ("ENEMY" if any(at_war(u[2]) for u in foreign) else "foreign") + " units near our land"))
-    for xy in field:
-        spots.append((xy, "our army in the field"))
+    enemies = [xy for xy, us in UNITS.items() if any(u[2] != ME and at_war(u[2]) for u in us)] + \
+              [xy for xy, c in CITIES.items() if c["owner"] != ME and at_war(c["owner"])]
+    for xy in field_stacks():
+        # a lone unit on the road is not a place that matters; a stack, or anything next to an enemy, is
+        if len(military(UNITS[xy], ME)) >= 2 or any(dist(xy, e) <= 2 for e in enemies):
+            spots.append((xy, "our army in the field"))
     return spots
+
+
+def card_targets():
+    """Battle cards: the enemy city nearest to an army of ours in the field (within 6 tiles); with no army out,
+    an enemy city within 4 tiles of our nearest city; plus a second enemy city within 3 tiles of our units."""
+    enemy = [xy for xy, c in CITIES.items() if c["owner"] != ME and at_war(c["owner"])]
+    if not enemy:
+        return []
+    field = field_stacks()
+    if field:
+        t, d = min(((e, min(dist(e, f) for f in field)) for e in enemy), key=lambda x: x[1])
+        first = [t] if d <= 6 else []
+    else:
+        t = min(enemy, key=lambda e: min([dist(e, m) for m in my_cities()] or [99]))
+        first = [t] if min([dist(t, m) for m in my_cities()] or [99]) <= 4 else []
+    ours = [xy for xy, us in UNITS.items() if military(us, ME)]
+    second = [e for e in enemy if e not in first and any(dist(e, u) <= 3 for u in ours)]
+    return first + second[:1]
 
 
 def crops_for(spots, limit=3):
@@ -358,13 +387,14 @@ def brief(state, pic_dir=None):
                 continue
             seen.add(xy)
             L += [around(xy, None if xy in CITIES else why.capitalize()), ""]
-        targets = sorted([xy for xy, why in spots if why == "enemy city"],
-                         key=lambda t: min(dist(t, m) for m in my_cities()) if my_cities() else 0)
-        targets = targets[:1] + [t for t in targets[1:2] if min(dist(t, m) for m in my_cities()) <= 6]
-        for t in targets:
+        for t in card_targets():
             L += ["### Battle card: %s" % CITIES[t]["name"], "", battle_card(t), ""]
     else:
         L += ["", "No hot spots this turn: no enemy city at war near us, no foreign army by our land, no army of ours in the field."]
+    shown = {xy for xy, why in spots}
+    far = [c["name"] for xy, c in CITIES.items() if c["owner"] != ME and at_war(c["owner"]) and xy not in shown]
+    if far:
+        L += ["Enemy cities farther from us (not shown): %s. Ask: `civ card <city>`, `civ around X Y`." % ", ".join(sorted(far))]
     if pic_dir:
         files = pictures(state, pic_dir, spots)
         if files:

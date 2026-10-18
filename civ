@@ -182,7 +182,7 @@ def land_name(owner, players):
     return "in %s's land" % (p["name"] if p else "player %d" % owner)
 
 
-def fmt_status(s):
+def fmt_status(s, compact=False):
     me = s["me"]
     players = {p["id"]: p for p in s["players"]}
     mep, emp = players[me], s["my_empire"]
@@ -210,30 +210,20 @@ def fmt_status(s):
     if not emp["cities"]:
         out.append("  (none)")
     out.append("")
-    out.append("Units:")
-    for u in sorted(s["my_units"], key=lambda u: (u["x"], u["y"], u["id"])):
-        flags = []
-        if u["automated"]:
-            flags.append("automated")
-        if u["fortified"]:
-            flags.append("fortified")
-        if u["waiting"]:
-            flags.append("waiting")
-        if u.get("claimed"):
-            flags.append("CLAUDE" + (" -> %d,%d" % tuple(u["target"]) if u.get("target") else ", waiting for orders"))
-        if u["missions_queued"]:
-            flags.append("%d orders queued" % u["missions_queued"])
-        if u["damage"]:
-            flags.append("damaged %d%%" % u["damage"])
-        if u.get("land", me) != me:
-            flags.append(land_name(u["land"], players))
-        out.append("  #%-5d %-14s (%d,%d) moves %g/%g lvl %d%s" % (
-            u["id"], short(u["type"]), u["x"], u["y"], u["moves"] / MOVE, u["max_moves"] / MOVE,
-            u["level"], ("  [" + ", ".join(flags) + "]") if flags else ""))
+    if compact:
+        out += units_by_tile(s, players)
+    else:
+        out += units_one_per_line(s, players)
     out.append("")
     out.append("Foreign units I see now:")
     order = {"inside": 0, "near": 1, "elsewhere": 2}
     seen = sorted(s.get("foreign_seen", []), key=lambda g: (not g["war"], order[g["where"]], g["who"], g["x"], g["y"]))
+    if compact:
+        # far-off units (other leaders' home armies) only when an enemy's and within 6 tiles of ours
+        ours = [(u["x"], u["y"]) for u in s["my_units"]] + [(c["x"], c["y"]) for c in emp["cities"]]
+        near = lambda g: any(max(abs(g["x"] - x), abs(g["y"] - y)) <= 6 for x, y in ours)
+        cut = [g for g in seen if g["where"] == "elsewhere" and not (g["war"] and near(g))]
+        seen = [g for g in seen if g not in cut]
     for g in seen:
         names = {}
         for n in g["units"]:
@@ -245,6 +235,8 @@ def fmt_status(s):
             ", ".join("%d %s" % (c, n) if c > 1 else n for n, c in names.items())))
     if not seen:
         out.append("  (none)")
+    if compact and cut:
+        out.append("  (%d more groups far from us: `civ status`)" % len(cut))
     out.append("")
     out.append("Others:")
     known = False
@@ -259,8 +251,91 @@ def fmt_status(s):
     unmet = sum(1 for p in players.values() if not p.get("met") and not p.get("barbarian"))
     if not known:
         out.append("  nobody met yet")
-    out.append("  not met: %d civs" % unmet)
+    if unmet:
+        out.append("  not met: %d civs" % unmet)
     return "\n".join(out)
+
+
+def unit_flags(u, me, players, with_land=True):
+    flags = []
+    if u["automated"]:
+        flags.append("automated")
+    if u["fortified"]:
+        flags.append("fortified")
+    if u["waiting"]:
+        flags.append("waiting")
+    if u.get("claimed"):
+        flags.append("CLAUDE" + (" -> %d,%d" % tuple(u["target"]) if u.get("target") else ", waiting for orders"))
+    if u["missions_queued"]:
+        flags.append("%d orders queued" % u["missions_queued"])
+    if u["damage"]:
+        flags.append("damaged %d%%" % u["damage"])
+    if with_land and u.get("land", me) != me:
+        flags.append(land_name(u["land"], players))
+    return flags
+
+
+def units_by_tile(s, players):
+    # one line per tile: what stands there, by type, with the ids orders need and what each is doing
+    me = s["me"]
+    cities = {(c["x"], c["y"]): c["name"] for c in s["my_empire"]["cities"]}
+    tiles = {}
+    for u in s["my_units"]:
+        tiles.setdefault((u["x"], u["y"]), []).append(u)
+    out = ["Units by tile (ids for orders). Units you command show where they go (-> X,Y) or 'idle' (waiting for your "
+           "orders); unmarked units are run by the game's automation:"]
+    for xy in sorted(tiles, key=lambda t: (t not in cities, t)):
+        us = tiles[xy]
+        kinds = {}
+        for u in sorted(us, key=lambda u: u["id"]):
+            kinds.setdefault(short(u["type"]), []).append(u)
+        parts = []
+        for kind, group in kinds.items():
+            ids = []
+            for u in group:
+                f = []
+                if u.get("claimed"):
+                    there = u.get("target") and tuple(u["target"]) != (u["x"], u["y"])
+                    f.append("-> %d,%d" % tuple(u["target"]) if there else "idle")
+                if u["damage"]:
+                    f.append("hurt %d%%" % u["damage"])
+                ids.append("#%d%s%s" % (u["id"], " lvl %d" % u["level"] if u["level"] > 1 else "",
+                                        " (" + ", ".join(f) + ")" if f else ""))
+            parts.append("%s x%d: %s" % (kind, len(group), " ".join(ids)) if len(group) > 1 else "%s %s" % (kind, ids[0]))
+        land = us[0].get("land", me)
+        place = cities.get(xy) or ("in " + (players[land]["name"] + "'s land" if land in players and land != me else
+                                            "our land" if land == me else "unclaimed land"))
+        out.append("  %d,%d %s: %s" % (xy[0], xy[1], place, "; ".join(parts)))
+    if not tiles:
+        out.append("  (none)")
+    return out
+
+
+LOOKUPS = {"ping", "status", "map", "tile", "odds", "city", "unit", "player", "actions", "offers", "proposals",
+           "tradeable", "relations", "victory", "rules", "area", "around", "where", "card", "chat", "events", "deals",
+           "think", "director"}
+SHOW_WITHOUT_ARGS = {"research", "budget", "religion", "civics", "gate", "hurry"}
+
+
+def read_only(argv):
+    # what a test run (CIV_READONLY=1) may do: look, think, write notes; never change the game
+    cmd, rest = argv[0], argv[1:]
+    if cmd in LOOKUPS or "--check" in rest:
+        return True
+    if cmd in SHOW_WITHOUT_ARGS:
+        return not rest or (cmd == "hurry" and len(rest) == 1)
+    return cmd == "raw" and len(rest) >= 1 and rest[0] in LOOKUPS | SHOW_WITHOUT_ARGS | {"map", "status"}
+
+
+def units_one_per_line(s, players):
+    me = s["me"]
+    out = ["Units:"]
+    for u in sorted(s["my_units"], key=lambda u: (u["x"], u["y"], u["id"])):
+        flags = unit_flags(u, me, players)
+        out.append("  #%-5d %-14s (%d,%d) moves %g/%g lvl %d%s" % (
+            u["id"], short(u["type"]), u["x"], u["y"], u["moves"] / MOVE, u["max_moves"] / MOVE,
+            u["level"], ("  [" + ", ".join(flags) + "]") if flags else ""))
+    return out
 
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -382,6 +457,9 @@ def main(argv):
     if not argv or argv[0] in ("-h", "--help", "help"):
         print(__doc__.strip())
         return 0
+    if os.environ.get("CIV_READONLY") == "1" and not read_only(argv):
+        print("(test run: not sent to the game) civ %s" % " ".join(argv))
+        return 0
     cmd = argv[0]
     try:
         if cmd == "ping":
@@ -395,7 +473,7 @@ def main(argv):
                     r.get("bridge_version", 1), ms, r["turn"], year(r["year"]), r["claude_player"],
                     r["turn_active_players"]))
         elif cmd == "status":
-            print(fmt_status(call("status")))
+            print(fmt_status(call("status"), compact="--brief" in argv))
         elif cmd == "map":
             cmd_map(argv[1:])
         elif cmd in ("around", "card", "where"):

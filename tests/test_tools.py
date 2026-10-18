@@ -76,6 +76,28 @@ def test_brief_skips_abandoned_wakes():
             assert not (m and int(m.group(1)) >= t and m.group(2) < w), "a wake-up of an abandoned timeline reached the brief"
 
 
+def test_record_is_built_from_commands():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("loop", os.path.join(HERE, "loop.py"))
+    loop = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(loop)
+    r = loop.summarize_commands(["status", "move 1 5 6", "move 2 5 6", "do 3 BOMBARD", "do 4 BOMBARD", "think x", "ready"])
+    assert r == "said nothing; moved #1 #2 to 5,6; BOMBARD: #3 #4; civ ready", r
+    assert loop.summarize_commands(["say Brother, hello"]).startswith('said "Brother, hello"')
+
+
+def test_read_only_mode_lets_only_lookups_through():
+    import importlib.machinery, importlib.util
+    loader = importlib.machinery.SourceFileLoader("civcli", os.path.join(HERE, "civ"))
+    spec = importlib.util.spec_from_loader("civcli", loader)
+    civ = importlib.util.module_from_spec(spec)
+    loader.exec_module(civ)
+    for ok in (["status"], ["odds", "1", "2"], ["research"], ["build", "X", "Y", "--check"], ["hurry", "Turfan"], ["think", "x"]):
+        assert civ.read_only(ok), ok
+    for no in (["say", "hi"], ["research", "Drama"], ["move", "1", "2", "3"], ["ready"], ["hurry", "Turfan", "whip"], ["raw", "say"]):
+        assert not civ.read_only(no), no
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

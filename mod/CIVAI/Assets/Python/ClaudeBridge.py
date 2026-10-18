@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 62
+BRIDGE_VERSION = 63
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3749,7 +3749,13 @@ def enemiesNear():
 
 def autoReadyOrWake(turn):
 	g = readGate()
-	if not (g.get("on") and g.get("auto")):
+	if not g.get("on"):
+		return
+	if not g.get("auto"):
+		# auto-ready off means "wake me every turn": the gate stays closed until Claude says ready
+		reasons = list(g.get("attention") or []) + ["turn"]
+		writeGate(g)
+		writeEvent("claude_wake", {"turn": turn, "reasons": reasons})
 		return
 	reasons = list(g.get("attention") or [])
 	enemies = enemiesNear()
@@ -3779,7 +3785,11 @@ def cannotDoControl(gu, argsList):
 	if eControl in (ControlTypes.CONTROL_ENDTURN, ControlTypes.CONTROL_ENDTURN_ALT, ControlTypes.CONTROL_FORCEENDTURN):
 		if not claudeReady():
 			# canDoControl is also polled to draw the button; only nag once in a while
-			g_gateNag[0] = g_gateNag[0] + 1
+			# the first press on each turn wakes Claude; after that, a reminder once in a while
+			turn = gc.getGame().getGameTurn()
+			first = g_gateNag[1:] != [turn]
+			g_gateNag[1:] = [turn]
+			g_gateNag[0] = first and 1 or g_gateNag[0] + 1
 			if g_gateNag[0] % 200 == 1:
 				CyInterface().addImmediateMessage(u"%s is still thinking about this turn... (type !go in chat to skip)" %
 					gc.getPlayer(getClaudePlayer()).getName(), "")

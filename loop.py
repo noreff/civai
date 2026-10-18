@@ -7,7 +7,7 @@ model acts through `civ` commands and updates its files, and the call ends.
 
   ./loop.py                 play with the model command from loop.json ("agent")
   ./loop.py --once          handle one wake-up now and exit (for testing)
-  ./loop.py --dry-run       print the prompt of the next wake-up and exit
+  ./loop.py --dry-run       print the prompt of the next wake-up and exit (--v2: the new prompt; --system: its system part)
 
 loop.json (next to this file):
   {"agent": ["claude", "-p", "{prompt}", ...], "timeout_minutes": 15}
@@ -36,6 +36,12 @@ CHAT_LINES = 30             # recent chat shown on every wake-up, new lines mark
 AMBITIONS_STALE = 30        # turns: past this, the brief says the ambitions haven't been revised
 MEMORY_TOKENS_WARN = 12000  # past this, the brief asks the agent to trim its memory files
 GATHER_SECONDS = 4          # a burst of events (chat + turn start...) becomes one wake-up
+SYSTEM_FILE_V2 = os.path.join(HERE, "out", "system_prompt_v2.md")
+LOOP_SKIP = ("## Start of a session",)   # playbook sections for a person starting a session by hand, not the loop
+BRIEF_CHAT_LINES = 12       # v2: chat shown (at least the last 5 turns' worth, up to this many lines)
+BRIEF_CHAT_TURNS = 5
+BRIEF_EVENTS = 40           # v2: events since the last wake-up, the rest behind `civ events`
+SHADOW = "_shadow"          # games/_shadow: the test copy a shadow run plays in (read-only to the game)
 
 
 def civ(*args):
@@ -208,19 +214,177 @@ def prompt_for(d, events, chat, reasons):
     ])
 
 
-def run_agent(cfg, prompt, resume=None):
+# ---------------------------------------------------------------- v2 prompt: what a ruler needs, in that order
+def playbook_for_loop():
+    # the playbook without the sections for a person starting a session by hand
+    text, out, skip = open(os.path.join(HERE, "PLAYBOOK.md")).read(), [], False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            skip = line.startswith(LOOP_SKIP)
+        if not skip:
+            out.append(line)
+    return "\n".join(out)
+
+
+def wake_files(d):
+    # this timeline's wake-up logs, oldest first (a wake-up written before a reload, about a turn at or
+    # after the reloaded one, belongs to the abandoned timeline)
+    w = os.path.join(d, "wakes")
+    if not os.path.isdir(w):
+        return []
+    names = sorted(os.listdir(w), key=lambda x: os.path.getmtime(os.path.join(w, x)))
+    cuts = [(time.mktime(time.strptime(t, "%Y-%m-%d %H:%M:%S")), n) for t, n in timeline.rewinds(EVENTS)]
+    def abandoned(x):
+        m = re.match(r"T(\d+)-", x)
+        return bool(m) and any(os.path.getmtime(os.path.join(w, x)) < t and int(m.group(1)) >= n for t, n in cuts)
+    return [os.path.join(w, x) for x in names if not abandoned(x)]
+
+
+def summarize_commands(cmds):
+    # what a wake-up did, from the commands it really ran (never from its own retelling)
+    said, moves, dos, other, looks = [], {}, {}, [], 0
+    for c in cmds:
+        words = c.split()
+        if not words:
+            continue
+        if words[0] == "say":
+            said.append('"%s"' % " ".join(words[1:])[:200])
+        elif words[0] == "move" and len(words) >= 4:
+            moves.setdefault("%s,%s" % (words[2], words[3]), []).append("#" + words[1])
+        elif words[0] == "do" and len(words) >= 3:
+            dos.setdefault(" ".join(words[2:]), []).append("#" + words[1])
+        elif words[0] in LOOKUPS or (words[0] in ("research", "budget", "religion", "civics", "gate") and len(words) == 1):
+            looks += 1
+        elif words[0] != "think":
+            other.append("civ " + c[:120])
+    parts = ["said " + " / ".join(said) if said else "said nothing"]
+    parts += ["moved %s to %s" % (" ".join(ids), xy) for xy, ids in moves.items()]
+    parts += ["%s: %s" % (a, " ".join(ids)) for a, ids in dos.items()]
+    parts += other
+    return "; ".join(parts)
+
+
+def record_of_wakes(d, n=3):
+    out = []
+    for path in wake_files(d)[-n:]:
+        text = open(path).read()
+        head = text.splitlines()[0].lstrip("# ")
+        why = next((l.replace("**Why:**", "").strip() for l in text.splitlines() if l.startswith("**Why:**")), "")
+        cmds = re.findall(r"^- `civ (.*)`$", text.split("**Commands:**", 1)[-1].split("**Final words:**")[0], re.M)
+        out.append("- %s (%s): %s" % (head, why[:160], summarize_commands(cmds)))
+    return out
+
+
+def chat_lines(new_chat):
+    # the chat of the last few turns: at least BRIEF_CHAT_LINES lines, at most twice that
+    rows = timeline.read(CHAT, timeline.chat_rewind)
+    now = game_turn()
+    recent = sum(1 for c in rows if isinstance(c.get("turn"), int) and c["turn"] > now - BRIEF_CHAT_TURNS)
+    rows = rows[-min(max(recent, BRIEF_CHAT_LINES), 2 * BRIEF_CHAT_LINES):]
+    new_ids = set(json.dumps(c, sort_keys=True) for c in new_chat)
+    return ["%sT%s %s: %s" % ("NEW " if json.dumps(c, sort_keys=True) in new_ids and c.get("from") != "claude" else "",
+            c.get("turn"), "you" if c.get("from") == "claude" else human_name(), c.get("text")) for c in rows]
+
+
+def raw(cmd):
+    try:
+        return json.loads(civ("raw", cmd))
+    except ValueError:
+        return {}
+
+
+def waiting_lines():
+    # what waits for an answer: proposals and our own open offers, one line each
+    out = [l for l in raw("proposals").get("open", []) if l != "none"]
+    o = raw("offers")
+    out += ["our offer waiting: %s" % l for l in o.get("open", []) if l != "none"]
+    out += ["deal waiting for your seal: %s" % l for l in o.get("waiting_for_your_seal", []) if l != "none"]
+    return out
+
+
+def state_section():
+    r, b = raw("research"), raw("budget")
+    lines = [civ("status", "--brief"), ""]
+    if r:
+        lines.append("Research: %s, %s turns (%s beakers/turn; queue: %s). Can research: %s." % (
+            r.get("researching"), r.get("turns"), r.get("beakers_per_turn"), ", ".join(r.get("queue") or []) or "-",
+            ", ".join(r.get("can_research") or [])))
+    if b:
+        lines.append("Budget: %s (%s); per turn %s." % (b.get("split"), b.get("chosen_by"), b.get("per_turn")))
+    deals = raw("deals").get("deals") or []
+    lines.append("Ongoing deals:" + ("" if deals else " none"))
+    lines += ["  " + l for l in deals]
+    return "\n".join(lines)
+
+
+def inbox(d):
+    p = os.path.join(d, "director_inbox.md")
+    return open(p).read().strip() if os.path.exists(p) else ""
+
+
+def prompt_v2(d, events, chat, reasons, rec_dir=None):
+    """The wake-up message: why you are woken first, then who you are and what you planned, what you
+    really did lately (from the logs), the others, the state, the chat, the map; the reason again last."""
+    rec_dir = rec_dir or d
+    read = lambda name: open(os.path.join(d, name)).read().strip() if os.path.exists(os.path.join(d, name)) else ""
+    turn = game_turn()
+    turn_wake = any(r.startswith(("turn ", "player_waiting")) for r in reasons)
+    W = ["# WAKE-UP, turn %s: %s" % (turn, "; ".join(reasons)), ""]
+    shown = [fmt_event(e) for e in events if e.get("kind") not in NOISE]
+    W += ["## Since your last wake-up", ""] + (shown[-BRIEF_EVENTS:] or ["(no game events)"])
+    if len(shown) > BRIEF_EVENTS:
+        W.append("(%d earlier events: `civ events %d`)" % (len(shown) - BRIEF_EVENTS, len(shown)))
+    wait = waiting_lines()
+    if wait:
+        W += ["", "## Waiting for your answer", ""] + ["- " + l for l in wait]
+    notes = inbox(d)
+    if notes:
+        W += ["", "## From the director (about tools and process, never game advice; shown once)", "", notes]
+    memory = [read(m) for m in MEMORY] + [open(os.path.join(d, "dossiers", n)).read() for n in
+              (sorted(os.listdir(os.path.join(d, "dossiers"))) if os.path.isdir(os.path.join(d, "dossiers")) else [])]
+    size = sum(len(m) for m in memory) // 4
+    nudges = ambitions_note(civ("ping"))
+    if size > MEMORY_TOKENS_WARN:
+        nudges.append("**Your memory files are ~%d tokens (over %d). Trim them on this wake-up.**" % (size, MEMORY_TOKENS_WARN))
+    W += [n for n in nudges if n]
+    parts = ["\n".join(W)]
+    parts.append("# WHO YOU ARE, YOUR AIMS AND PLAN (game folder: %s)\n\n### persona.md\n\n%s\n\n### ambitions.md\n\n%s\n\n### plan.md\n\n%s"
+                 % (d, read("persona.md"), read("ambitions.md"), read("plan.md")))
+    parts.append("### secrets.md\n\n" + (read("secrets.md") or "(empty)"))
+    parts.append("# WHAT YOU REALLY DID ON YOUR LAST WAKE-UPS (from the game's log)\n\n" +
+                 ("\n".join(record_of_wakes(rec_dir)) or "(none yet)"))
+    dd = os.path.join(d, "dossiers")
+    dossiers = ["### dossiers/%s\n\n%s" % (n, open(os.path.join(dd, n)).read().strip())
+                for n in (sorted(os.listdir(dd)) if os.path.isdir(dd) else [])]
+    parts.append("# THE OTHER LEADERS (your dossiers)\n\n" + ("\n\n".join(dossiers) or "(none yet)"))
+    parts.append("### chronicle.md\n\n" + (read("chronicle.md") or "(empty)"))
+    parts.append("# STATE NOW\n\n" + state_section())
+    parts.append("# CHAT (recent; NEW = written to you since your last wake-up)\n\n" + ("\n".join(chat_lines(chat)) or "(none)"))
+    parts.append("# MAP\n\n" + my_land_map())
+    parts.append("# NOW: act on this wake-up (%s).%s" % ("; ".join(reasons), " Finish with `civ ready`." if turn_wake else ""))
+    system = "\n\n".join([
+        "You are the leader in persona.md, playing the current CIVAI game to win. Each message is ONE wake-up: act on it and "
+        "finish. You remember nothing between wake-ups except the files in the game folder, so before you finish, write "
+        "down in them whatever your future self must know. The playbook below is your full instruction set.",
+        "# PLAYBOOK\n\n" + playbook_for_loop()])
+    return system, "\n\n".join(parts)
+
+
+def run_agent(cfg, prompt, resume=None, system_file=SYSTEM_FILE, extra_env=None):
     cmd = [a.replace("{prompt}", prompt) for a in cfg["agent"]]
     if resume:
         cmd += ["--resume", resume]
     meta = {}
     if cmd and os.path.basename(cmd[0]) == "claude":
-        cmd += ["--append-system-prompt-file", SYSTEM_FILE, "--output-format", "json"]
+        cmd += ["--append-system-prompt-file", system_file, "--output-format", "json",
+                "--exclude-dynamic-system-prompt-sections"]
     stdin = None if any("{prompt}" in a for a in cfg["agent"]) else prompt
     t0 = time.time()
     error = None
     try:
         env = {k: v for k, v in os.environ.items() if not k.startswith("CIV_") or k in ("CIV_BOTTLE", "CIV_GAME")}
         env["CIV_ACTOR"] = "agent"   # marks the player's own commands in the logs
+        env.update(extra_env or {})
         r = subprocess.run(cmd, input=stdin, capture_output=True, text=True, cwd=HERE, env=env,
                            timeout=cfg.get("timeout_minutes", 15) * 60)
         out = r.stdout.strip() or r.stderr.strip()
@@ -316,20 +480,32 @@ def handle(cfg, d, st, events, chat, reasons):
     gid = os.path.basename(d)
     turn = next((e.get("turn") for e in reversed(events) if e.get("turn") is not None), "?")
     cmds_path, thoughts_path = os.path.join(d, "commands.jsonl"), os.path.join(d, "thoughts.jsonl")
-    prompt = prompt_for(d, events, chat, reasons)   # the loop's own lookups happen here, before the marks
-    m = re.search(r"Turn (\d+),", prompt)
+    if cfg.get("shadow"):
+        shadow_run(cfg, d, events, chat, reasons)
+    v2 = cfg.get("prompt") == "v2"
+    if v2:
+        system, prompt = prompt_v2(d, events, chat, reasons)   # the loop's own lookups happen here, before the marks
+        with open(SYSTEM_FILE_V2, "w") as f:
+            f.write(system)
+    else:
+        prompt = prompt_for(d, events, chat, reasons)
+    sysf = SYSTEM_FILE_V2 if v2 else SYSTEM_FILE
+    m = re.search(r"[Tt]urn (\d+)[,:]", prompt)
     if m:
         turn = m.group(1)
     cmds_pos = os.path.getsize(cmds_path) if os.path.exists(cmds_path) else 0
     th_pos = os.path.getsize(thoughts_path) if os.path.exists(thoughts_path) else 0
-    out, secs, meta, error = run_agent(cfg, prompt)
+    out, secs, meta, error = run_agent(cfg, prompt, system_file=sysf)
+    if v2 and not error:
+        archive_inbox(d)
     agent_cmds = [c for c in lines_since(cmds_path, cmds_pos) if c.get("by", "agent") == "agent"]   # not the director's
     check = None
     added = memory_added(d)
     if not error and meta.get("session_id") and (added or any(c.get("cmd", "").startswith("say") for c in agent_cmds)):
         # the same session checks its notes against the game's log and fixes what doesn't match
         pos = os.path.getsize(cmds_path) if os.path.exists(cmds_path) else 0
-        check, csecs, cmeta, cerr = run_agent(cfg, check_prompt(agent_cmds, added, out), resume=meta["session_id"])
+        check, csecs, cmeta, cerr = run_agent(cfg, check_prompt(agent_cmds, added, out), resume=meta["session_id"],
+                                              system_file=sysf)
         fixed = [c for c in lines_since(cmds_path, pos) if c.get("by", "agent") == "agent"]
         agent_cmds += fixed
         secs += csecs
@@ -371,6 +547,56 @@ def notice(text):
     civ("raw", "notice", json.dumps({"text": text}))
 
 
+def archive_inbox(d):
+    # director answers are shown once, then kept in the archive
+    p = os.path.join(d, "director_inbox.md")
+    if os.path.exists(p) and open(p).read().strip():
+        with open(os.path.join(d, "director_notes_archive.md"), "a") as f:
+            f.write("\n" + open(p).read().strip() + "\n")
+        open(p, "w").close()
+
+
+SHADOW_FILES = ("persona.md", "ambitions.md", "plan.md", "secrets.md", "chronicle.md", "director_inbox.md")
+
+
+def shadow_run(cfg, d, events, chat, reasons):
+    """The v2 prompt on the same wake-up, before the live one, in a copy of the memory, with `civ` read-only:
+    what it would have done goes to games/_shadow (commands, final words, the prompt itself) for comparison."""
+    sd = os.path.join(HERE, "games", SHADOW)
+    import shutil
+    if os.path.isdir(os.path.join(sd, "dossiers")):
+        shutil.rmtree(os.path.join(sd, "dossiers"))
+    for sub in ("wakes", "prompts"):
+        os.makedirs(os.path.join(sd, sub), exist_ok=True)
+    for name in SHADOW_FILES:
+        if os.path.exists(os.path.join(d, name)):
+            shutil.copy(os.path.join(d, name), os.path.join(sd, name))
+    if os.path.isdir(os.path.join(d, "dossiers")):
+        shutil.copytree(os.path.join(d, "dossiers"), os.path.join(sd, "dossiers"))
+    system, prompt = prompt_v2(sd, events, chat, reasons, rec_dir=d)
+    with open(SYSTEM_FILE_V2, "w") as f:
+        f.write(system)
+    stamp = time.strftime("%H%M%S")
+    turn = game_turn()
+    with open(os.path.join(sd, "prompts", "T%03d-%s-v2.md" % (turn, stamp)), "w") as f:
+        f.write(prompt)
+    with open(os.path.join(sd, "prompts", "T%03d-%s-v1.md" % (turn, stamp)), "w") as f:
+        f.write(prompt_for(d, events, chat, reasons))   # the live prompt, for side-by-side reading
+    cmds_path = os.path.join(sd, "commands.jsonl")
+    pos = os.path.getsize(cmds_path) if os.path.exists(cmds_path) else 0
+    out, secs, meta, error = run_agent(cfg, prompt, system_file=SYSTEM_FILE_V2,
+                                       extra_env={"CIV_READONLY": "1", "CIV_GAME": SHADOW})
+    cmds = [c.get("cmd", "") for c in lines_since(cmds_path, pos)]
+    log = ["# Shadow wake-up, turn %s (%s)" % (turn, time.strftime("%Y-%m-%d %H:%M:%S")), "", "**Why:** " + "; ".join(reasons),
+           "", "**Commands:**", ""] + ["- `civ %s`" % c for c in cmds] + ["", "**Final words:**", "", out[-3000:], "",
+           "_%.0f s, prompt ~%d tokens, %s_" % (secs, len(prompt) // 4, error or "ok")]
+    open(os.path.join(sd, "wakes", "T%03d-%s.md" % (turn, stamp)), "w").write("\n".join(log))
+    with open(os.path.join(sd, "wake_stats.jsonl"), "a") as f:
+        f.write(json.dumps(dict(meta, turn=turn, seconds=round(secs, 1), reasons=reasons, prompt_tokens=len(prompt) // 4,
+                                error=error, wall=time.strftime("%Y-%m-%d %H:%M:%S")), ensure_ascii=False) + "\n")
+    print(time.strftime("%H:%M:%S"), "shadow done (%.0f s, %d commands)" % (secs, len(cmds)), flush=True)
+
+
 def snapshot_memory(d, message):
     # the game folder as a git history: every wake-up's memory files can be read back later
     try:
@@ -389,6 +615,8 @@ def reasons_of(events):
         k = e.get("kind")
         if k not in WAKE_KINDS:
             continue
+        if k in ("deal_done", "deal_failed") and "id" not in e:
+            continue   # an AI's answer or our own gift: we saw it when we made it; it waits for the next wake-up
         if k == "claude_wake":
             out.append("turn %s: %s" % (e.get("turn"), ", ".join(e.get("reasons", []))))
         elif k == "message_from_player":
@@ -417,7 +645,11 @@ def main():
             reasons = reasons_of(events)
         chat, cpos = read_from(CHAT, st["chat_pos"])
         if dry:
-            print(prompt_for(d, events, chat, reasons or ["(dry run)"]))
+            if "--v2" in sys.argv:
+                system, prompt = prompt_v2(d, events, chat, reasons or ["(dry run)"])
+                print(prompt if "--system" not in sys.argv else system)
+            else:
+                print(prompt_for(d, events, chat, reasons or ["(dry run)"]))
             return
         error = handle(cfg, d, st, events, chat, reasons or ["manual run"])
         if error and not once:
