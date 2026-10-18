@@ -653,7 +653,8 @@ def main(argv):
             tid = open(last).read().strip() if os.path.exists(last) else None
             if tid:
                 os.remove(last)
-            video_log("said.jsonl", {"text": text, "thought_id": tid})
+            video_log("said.jsonl", {"text": text, "thought_id": tid, "turn": r.get("turn"), "to": r.get("to"),
+                                     "read_by": r.get("read_by")})
             print("shown in game")
         elif cmd == "chat":
             n = int(argv[1]) if len(argv) > 1 else 20

@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 71
+BRIDGE_VERSION = 72
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1451,7 +1451,8 @@ def cmdSay(args):
 			and gc.getTeam(gc.getPlayer(i).getTeam()).isHasMet(me) and (to is None or i == to)]
 		readers = [pname(i) for i in heard if isAgent(i) or gc.getPlayer(i).isHuman()]
 		deaf = [pname(i) for i in heard if not isAgent(i) and not gc.getPlayer(i).isHuman()]
-		r = {"shown": True, "to": to is None and "all" or pname(to), "read_by": readers or ["nobody"]}
+		r = {"shown": True, "to": to is None and "all" or pname(to), "read_by": readers or ["nobody"],
+			"turn": gc.getGame().getGameTurn()}
 		if deaf:
 			r["note"] = "%s: run by the game's own AI, which reads no chat; deals and deeds speak to it" % ", ".join(deaf)
 		return r
@@ -1471,7 +1472,7 @@ def cmdSay(args):
 				CyInterface().addMessage(i, True, gc.getEVENT_MESSAGE_TIME() * 3, line, "",
 					InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
 	writeChat("claude", text)
-	return {"shown": True}
+	return {"shown": True, "turn": gc.getGame().getGameTurn()}
 
 
 def cmdNotice(args):
