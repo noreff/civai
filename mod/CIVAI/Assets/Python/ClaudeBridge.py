@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 145
+BRIDGE_VERSION = 147
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1223,7 +1223,8 @@ def cameraman():
 			break
 	if not shot:
 		return
-	x, y, zoom, pitch = shot
+	x, y, zoom, pitch, who = shot
+	shotLabel(who)
 	cam = CyCamera()
 	plot = gc.getMap().plot(x, y)
 	cam.JustLookAtPlot(plot)
@@ -1232,7 +1233,7 @@ def cameraman():
 	g_camera["until"] = now + SHOT_SECONDS
 	# a shot never stands still: the camera drifts a tile or two across it and pushes in a little
 	dx, dy = random.choice(((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)))
-	glide(plot, gc.getMap().plot(x + 2 * dx, y + 2 * dy), zoom, zoom * 0.85, SHOT_SECONDS)
+	glide(plot, gc.getMap().plot(x + 2 * dx, y + 2 * dy), zoom, zoom * 0.92, SHOT_SECONDS)
 
 def glide(a, b, z0, z1, seconds):
 	if a.isNone():
@@ -1244,8 +1245,9 @@ def glide(a, b, z0, z1, seconds):
 
 def pushIn(plot, seconds):
 	# an event's shot holds on the place and slowly pushes in
-	z = CyCamera().GetZoom()
-	glide(plot, plot, z, z * 0.85, seconds)
+	z = max(CyCamera().GetZoom(), 0.45)
+	glide(plot, plot, z, z * 0.92, seconds)
+	shotLabel([plot.getOwner()])
 
 def cameraMoving(now):
 	# from every poll (about 25 a second): the next small step of the current shot's drift
@@ -1282,7 +1284,8 @@ def pickShot(kind, random):
 		best = [k for k, v in sorted(stacks.items(), key=lambda kv: -kv[1])[:3] if v >= 2]
 		if best:
 			x, y = random.choice(best)
-			return (x, y, 0.35, -12.0)
+			pl = m.plot(x, y)
+			return (x, y, 0.5, -12.0, [pl.getUnit(0).getOwner()])
 		return None
 	if kind == "frontier":
 		edges = []
@@ -1295,12 +1298,12 @@ def pickShot(kind, random):
 				q = m.plot(pl.getX() + dx, pl.getY() + dy)
 				if not q.isNone() and q.getOwner() in seats and q.getOwner() != a:
 					war = gc.getTeam(gc.getPlayer(a).getTeam()).isAtWar(gc.getPlayer(q.getOwner()).getTeam())
-					edges.append((war and 3 or 1, pl.getX(), pl.getY()))
+					edges.append((war and 3 or 1, pl.getX(), pl.getY(), q.getOwner()))
 					break
 		if edges:
 			top = max([e[0] for e in edges])
-			w, x, y = random.choice([e for e in edges if e[0] == top])
-			return (x, y, 0.45, -8.0)
+			w, x, y, b = random.choice([e for e in edges if e[0] == top])
+			return (x, y, 0.6, -8.0, [m.plot(x, y).getOwner(), b])
 		return None
 	if kind == "city":
 		cities = []
@@ -1311,14 +1314,14 @@ def pickShot(kind, random):
 				(c, it) = gc.getPlayer(i).nextCity(it, False)
 		if cities:
 			c = random.choice(cities)
-			return (c.getX(), c.getY(), 0.3, -15.0)
+			return (c.getX(), c.getY(), 0.45, -15.0, [c.getOwner()])
 		return None
 	if kind == "wide":
 		i = seats[g_camera.get("wide", 0) % len(seats)]
 		g_camera["wide"] = g_camera.get("wide", 0) + 1
 		c = gc.getPlayer(i).getCapitalCity()
 		if c and not c.isNone():
-			return (c.getX(), c.getY(), 0.7, 0.0)
+			return (c.getX(), c.getY(), 0.8, 0.0, [i])
 	return None
 
 def spectatorView():
@@ -1766,6 +1769,32 @@ def chatShow(head, text):
 
 CAPTION_SECONDS = 8
 g_caption = {"text": None, "until": 0.0, "shown": None}
+g_who = {"text": None, "shown": None}
+
+def shotLabel(players):
+	# whose land the shot shows, at the top of the screen: "Claude Sonnet · Asoka · India"
+	names = []
+	for i in players:
+		if i is not None and i >= 0 and gc.getPlayer(i).isAlive() and agentPlayers().count(i):
+			p = gc.getPlayer(i)
+			t = p.getName() != realName(i) and u"%s \u00b7 %s \u00b7 %s" % (p.getName(), realName(i),
+				p.getCivilizationShortDescription(0)) or u"%s \u00b7 %s" % (realName(i), p.getCivilizationShortDescription(0))
+			if colored(i, t) not in names:
+				names.append(colored(i, t))
+	g_who["text"] = names and u"  |  ".join(names) or None
+
+def whoPanel(sc):
+	if g_who["text"] == g_who["shown"]:
+		return
+	g_who["shown"] = g_who["text"]
+	sc.deleteWidget("CIVAIWhoBG")
+	sc.deleteWidget("CIVAIWho")
+	if g_who["text"]:
+		W = sc.getXResolution()
+		w = min(int(W * 0.7), 40 + len(re.sub("<[^>]*>", "", g_who["text"])) * 13)
+		sc.addPanel("CIVAIWhoBG", u"", u"", True, False, (W - w) / 2, 54, w, 38, PanelStyles.PANEL_STYLE_MAIN_BLACK50)
+		sc.setLabel("CIVAIWho", "Background", u"<font=4>%s</font>" % g_who["text"], 1 << 2,
+			W / 2, 61, -0.1, FontTypes.TITLE_FONT, WidgetTypes.WIDGET_GENERAL, -1, -1)
 
 def caption(text):
 	# the event's title over the shot (the game shows its own pop-up only to the civs involved, never to the
@@ -1793,6 +1822,7 @@ def chatPanel():
 	now = camClock()
 	try:
 		captionPanel(CyGInterfaceScreen("MainInterface", CvScreenEnums.MAIN_INTERFACE), now)
+		whoPanel(CyGInterfaceScreen("MainInterface", CvScreenEnums.MAIN_INTERFACE))
 	except:
 		g_caption["text"] = None
 		log("caption FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
