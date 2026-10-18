@@ -849,6 +849,10 @@ def handle(cfg, d, st, events, chat, reasons):
     # the same effort policy for every seat: a working turn at the seat's effort, a sitting that asks for judgment deeper
     deep = cfg.get("effort_deep") or ("xhigh" if cfg.get("effort") in ("high", "xhigh") else "high")
     wcfg = dict(cfg, effort=deep) if kind != "turn" else cfg
+    tries = (st.get("refusals") or {}).get(str(game_turn()), 0)
+    if tries:
+        # the model's content filter refused this turn before: think less this time (logged with the wake-up)
+        wcfg = dict(wcfg, effort=REFUSAL_EFFORT[min(tries, len(REFUSAL_EFFORT)) - 1])
     out, secs, meta, error = run_agent(wcfg, prompt, system_file=sysf)
     meta["effort"] = wcfg.get("effort")
     meta["kind"] = kind
@@ -908,6 +912,7 @@ def handle(cfg, d, st, events, chat, reasons):
 
 
 REFUSALS_PER_TURN = 3
+REFUSAL_EFFORT = ("high", "medium")   # the effort of the retries after a content-filter refusal
 
 
 def refused(error):
