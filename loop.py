@@ -1067,7 +1067,8 @@ def main():
             # say so on screen, and wait longer each time (or until a usage limit says it resets). A seat's
             # civ is still not ready, so a game of several leaders waits for it: no one plays a turn short
             failures += 1
-            if refused(error) and st.get("last_kind") == "audience":
+            if refused(error) and st.get("last_kind") == "audience" and \
+                    not any(r.startswith(("turn ", "player_waiting")) for r in reasons):
                 # a refused audience is not retried: the message stays in the court chat of the next turn's brief,
                 # and the turn itself was never waiting on it
                 st["events_pos"], st["chat_pos"] = epos, cpos
