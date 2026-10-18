@@ -1,1 +1,4 @@
 T232: ship arrives T234; nothing reachable. Peace with Bull holds. Replied to Bull; Peter's count unanswered. If game continues T235: resume plan.
+T205: FOUND civics were Despotism/Barbarism all game! Switched (0 anarchy) to Universal Suffrage/Bureaucracy/Emancipation/Free Market/Organized Religion. Gold hurry now works: spent ~1420g hurrying all 4 cities. Each turn: hurry with spare gold. Queues extended.
+
+T223 council: not winning (1875 vs 3975/3602); road unchanged: econ/score, hold 4 cities. Cristo Redentor was built by America: Delhi's 421 hammers may be stranded; queued Hermitage first, then Industrial Park (check Delhi progress T224). Research switched to cheap techs to sell Gilgamesh (his purse refills): Rifling (9t) then Military Tradition; Computers later. Offered Gilgamesh 100g for Medicine (pending; he has it). Roosevelt: refuses Rifling; his next tech I hear first. No promises owed. Next council ~T228.
