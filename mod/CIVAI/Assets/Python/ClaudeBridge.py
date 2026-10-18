@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 64
+BRIDGE_VERSION = 65
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -162,6 +162,10 @@ def forEachSeat(fn, *args):
 			fn(*args)
 		finally:
 			actAs(prev)
+
+def isAgent(i):
+	# another agent's civ in a game of several agents (it answers offers itself)
+	return seatsConfigured() and i in agentPlayers()
 
 def getClaudePlayer():
 	# the request's own player if it names one; else config.txt "player = N";
@@ -2815,7 +2819,8 @@ def cmdOffer(args):
 	if atWar and engineReady() and "peace" not in [x[0] for x in give + get]:
 		raise Exception("we are at war with %s: any deal with them ends the war by the game's rule. Put peace in the "
 			"deal (--give peace --get peace ...) if you want that" % pname(other))
-	if not gc.getPlayer(other).isHuman() and not aiWillingToTalk(other, iMe):
+	agent = isAgent(other)
+	if not gc.getPlayer(other).isHuman() and not agent and not aiWillingToTalk(other, iMe):
 		why = "%s refuses to talk to us for now (the game's diplomacy screen stays closed); try again in a later turn" % pname(other)
 		if gc.getTeam(iTeam).isAtWar(gc.getPlayer(other).getTeam()):
 			why += ". At war, a leader refuses to talk for a while after the war begins; war success shortens it"
@@ -2825,11 +2830,28 @@ def cmdOffer(args):
 		# a gift needs no answer
 		executeDeal(iMe, other, give, [])
 		writeEvent("deal_done", {"with": pname(other), "gave": [itemText(x) for x in give], "got": []})
+		if agent:
+			prev = actAs(other)
+			try:
+				writeEvent("gift_received", {"from": pname(iMe), "got": [itemText(x) for x in give]})
+			finally:
+				actAs(prev)
 		if gc.getPlayer(other).isHuman():
 			CyInterface().addMessage(other, True, gc.getEVENT_MESSAGE_TIME() * 3,
 				u"<font=4><color=255,200,60,255>%s gives you: %s</color></font>" % (gc.getPlayer(iMe).getName(),
 				", ".join([itemText(x) for x in give])), "", InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
 		return {"done": True, "gave": [itemText(x) for x in give]}
+	if agent:
+		# another agent decides for itself: the offer waits in its proposals (civ answer N yes|no)
+		prev = actAs(other)
+		try:
+			newProposal(iMe, "agent_offer", 0, give, get)
+			n = loadProposals()["next"] - 1
+		finally:
+			actAs(prev)
+		writeEvent("deal_offered", {"to": pname(other), "their_number": n, "give": [itemText(x) for x in give],
+			"get": [itemText(x) for x in get]})
+		return {"offer": "sent", "waiting_for": pname(other), "note": "they answer in their own time; you hear it as an event"}
 	if not gc.getPlayer(other).isHuman():
 		if engineReady():
 			# the AI's own answer (CvPlayerAI::AI_considerOffer), as on the diplomacy screen
@@ -2979,7 +3001,7 @@ ANSWERS = {
 	"join_war": ("DIPLOEVENT_JOIN_WAR", "DIPLOEVENT_NO_JOIN_WAR"),
 	"stop_trading": ("DIPLOEVENT_STOP_TRADING", "DIPLOEVENT_NO_STOP_TRADING"),
 }
-TRADES = ("offer_deal", "offer_peace", "offer_city", "offer_vassal", "give_help", "screen_offer")
+TRADES = ("offer_deal", "offer_peace", "offer_city", "offer_vassal", "give_help", "screen_offer", "agent_offer")
 
 def proposalText(v):
 	if v["comment"] == "vote":
@@ -2992,6 +3014,8 @@ def proposalText(v):
 	c = v["comment"]
 	if c == "screen_offer":
 		return "%s offers on the diplomacy screen: you get %s; they get %s" % (who, gives, wants)
+	if c == "agent_offer":
+		return "%s offers a deal: you get %s; they get %s" % (who, gives, wants)
 	if c == "offer_peace":
 		return "%s offers peace: you get %s; they get %s" % (who, gives, wants)
 	if c in ("offer_deal", "offer_city", "offer_vassal"):
@@ -3074,7 +3098,7 @@ def answerProposal(n, yes, why=None):
 	done = []
 	if c == "vote":
 		return answerVote(o, n, v, why)
-	if yes and (gives or wants) and c in TRADES and c != "screen_offer" and not ai.isHuman():
+	if yes and (gives or wants) and c in TRADES and c not in ("screen_offer", "agent_offer") and not ai.isHuman():
 		# a turn may have passed: the AI must still want it (its own judgment, as when it proposed)
 		if not ai.AI_considerOfferText(iMe, engineText(wants), engineText(gives)):
 			yes = False
@@ -3099,6 +3123,16 @@ def answerProposal(n, yes, why=None):
 	refreshSnapshot()
 	writeEvent("proposal_answered", {"id": int(n), "answer": yes and "yes" or "no", "what": proposalText(v),
 		"result": done, "why": why})
+	if c == "agent_offer":
+		# the agent who offered hears the answer
+		me = getClaudePlayer()
+		prev = actAs(v["from"])
+		try:
+			writeEvent(yes and "deal_done" or "deal_declined", {"id": int(n), "with": pname(me), "by": pname(me),
+				"gave": [itemText(tuple(x)) for x in v["gives"]], "got": [itemText(tuple(x)) for x in v["wants"]],
+				"why": why})
+		finally:
+			actAs(prev)
 	return {"id": int(n), "answer": yes and "yes" or "no", "result": done or ["nothing changes"]}
 
 def newVote(me, voteId, source, vote, player, cityId, other, text):
