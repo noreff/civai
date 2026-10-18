@@ -111,6 +111,12 @@ import subprocess
 import time
 import uuid
 
+if __name__ == "__main__" and os.environ.get("CIV_BROKER"):
+    # inside a seat's sandbox: the broker runs the command as this seat (see broker.py)
+    sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+    import broker
+    sys.exit(broker.client(sys.argv[1:]))
+
 BRIDGE = os.path.expanduser(
     "~/Library/Application Support/CrossOver/Bottles/%s/drive_c/claude_bridge" % os.environ.get("CIV_BOTTLE", "civ4"))
 # a game of several agents keeps each seat's events and chat in claude_bridge/p<N>
