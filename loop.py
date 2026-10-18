@@ -366,6 +366,9 @@ def prompt_v2(d, events, chat, reasons, rec_dir=None):
         "You are the leader in persona.md, playing the current CIVAI game to win. Each message is ONE wake-up: act on it and "
         "finish. You remember nothing between wake-ups except the files in the game folder, so before you finish, write "
         "down in them whatever your future self must know. The playbook below is your full instruction set.",
+        "How you act: the Bash tool runs your `civ` commands (`~/civai/civ ...`; run independent lookups in parallel); "
+        "Read, Write and Edit work on your files in the game folder (read a file before you change it). "
+        "Keep tool output small: ask for what you need, not everything.",
         "# PLAYBOOK\n\n" + playbook_for_loop()])
     return system, "\n\n".join(parts)
 
@@ -376,8 +379,12 @@ def run_agent(cfg, prompt, resume=None, system_file=SYSTEM_FILE, extra_env=None)
         cmd += ["--resume", resume]
     meta = {}
     if cmd and os.path.basename(cmd[0]) == "claude":
-        cmd += ["--append-system-prompt-file", system_file, "--output-format", "json",
-                "--exclude-dynamic-system-prompt-sections"]
+        if cfg.get("system") == "replace":
+            # our text is the whole system prompt: the leader first, no coding-assistant identity
+            cmd += ["--system-prompt-file", system_file, "--output-format", "json"]
+        else:
+            cmd += ["--append-system-prompt-file", system_file, "--output-format", "json",
+                    "--exclude-dynamic-system-prompt-sections"]
     stdin = None if any("{prompt}" in a for a in cfg["agent"]) else prompt
     t0 = time.time()
     error = None

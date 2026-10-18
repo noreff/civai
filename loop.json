@@ -13,5 +13,6 @@
   ],
   "timeout_minutes": 15,
   "shadow": false,
-  "prompt": "v2"
+  "prompt": "v2",
+  "system": "replace"
 }
