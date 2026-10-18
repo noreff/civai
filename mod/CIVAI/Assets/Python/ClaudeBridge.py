@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 150
+BRIDGE_VERSION = 151
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3475,8 +3475,20 @@ def checkItem(giver, taker, it):
 	if kind == "gold" and g.getGold() < d:
 		raise Exception("%s has only %d gold" % (pname(giver), g.getGold()))
 	if not g.canTradeItem(taker, tradeData(it), False):
-		raise Exception("%s can't give %s to %s under the game's rules (e.g. tech trading needs Alphabet; "
-			"open borders need contact and no war...)" % (pname(giver), itemText(it, giver), pname(taker)))
+		if kind == "tech":
+			gt, tt = gc.getTeam(g.getTeam()), gc.getTeam(t.getTeam())
+			if not gt.isTechTrading() and not tt.isTechTrading():
+				why = "tech trading needs Alphabet on at least one side"
+			elif not t.canResearch(d, True):
+				why = "%s can't take it now (already has it, or lacks a tech it needs first)" % pname(taker)
+			elif giver == getClaudePlayer() and gt.isNoTradeTech(d):
+				why = "you received it in a trade this turn; the game lets a traded tech be passed on from the next turn"
+			else:
+				# the other side's reason stays theirs: only the rules that can stand in the way
+				why = "the game doesn't allow it now (a tech received in a trade can be passed on only from the next turn)"
+			raise Exception("%s can't give %s to %s: %s" % (pname(giver), itemText(it, giver), pname(taker), why))
+		raise Exception("%s can't give %s to %s under the game's rules (e.g. open borders need contact and no war...)"
+			% (pname(giver), itemText(it, giver), pname(taker)))
 
 def doItem(giver, taker, it):
 	g, t = gc.getPlayer(giver), gc.getPlayer(taker)
