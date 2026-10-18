@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 90
+BRIDGE_VERSION = 91
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3752,7 +3752,7 @@ def cmdRules(args):
 			"cost": me.getUnitProductionNeeded(i), "needs_techs": techList([info.getPrereqAndTech()] +
 				[info.getPrereqAndTechs(k) for k in range(gc.getNUM_UNIT_AND_TECH_PREREQS())]),
 			"needs_resource": bonuses, "needs_one_resource_of": orb,
-			"we_can_build_it": me.canTrain(i, False, False), "strategy": info.getStrategy(), "help": info.getHelp()}
+			"we_can_build_it": me.canTrain(i, False, False), "our_version": ownVersion(me.getID(), i) != i and gc.getUnitInfo(ownVersion(me.getID(), i)).getDescription() or "the same", "strategy": info.getStrategy(), "help": info.getHelp()}
 	i = findInfo(want, gc.getNumBuildingInfos(), gc.getBuildingInfo, "building_")
 	if i >= 0:
 		info = gc.getBuildingInfo(i)
@@ -3953,6 +3953,12 @@ def cityItemDone(c, order, data):
 		q.pop(0)
 		saveCityClaims(d)
 
+def ownVersion(player, unit):
+	# the unit this civilization builds for that unit's class (its unique unit, if it has one)
+	civ = gc.getCivilizationInfo(gc.getPlayer(player).getCivilizationType())
+	own = civ.getCivilizationUnits(gc.getUnitInfo(unit).getUnitClassType())
+	return own >= 0 and own or unit
+
 def buildableNow(c):
 	units = [gc.getUnitInfo(i).getDescription() for i in range(gc.getNumUnitInfos()) if c.canTrain(i, False, False)]
 	builds = [gc.getBuildingInfo(i).getDescription() for i in range(gc.getNumBuildingInfos()) if c.canConstruct(i, False, False, False)]
@@ -3977,8 +3983,10 @@ def whyCantBuild(c, order, i):
 	bonus = info.getPrereqAndBonus()
 	if bonus >= 0 and not c.hasBonus(bonus):
 		return "it needs %s connected to the city" % gc.getBonusInfo(bonus).getDescription()
-	if order == OrderTypes.ORDER_TRAIN and gc.getPlayer(c.getOwner()).canTrain(i, False, True) is False:
-		return "your civilization doesn't build this unit (another unit replaces it)"
+	if order == OrderTypes.ORDER_TRAIN:
+		own = ownVersion(c.getOwner(), i)
+		if own != i:
+			return "your civilization builds %s instead (its own version of this unit)" % gc.getUnitInfo(own).getDescription()
 	return "a requirement of the game isn't met (coast, river, a building it needs first, or a limit)"
 
 def findItem(want):
