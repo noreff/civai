@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 46
+BRIDGE_VERSION = 47
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1375,6 +1375,27 @@ def cmdDo(args):
 	name, a, targeted = match[0]
 	g = u.getGroup()
 	m, c, au = a.getMissionType(), a.getCommandType(), a.getAutomateType()
+	if name == "LEAD":
+		# without a unit the game opens a "which unit?" window that only a human's screen shows
+		promo = gc.getUnitInfo(u.getUnitType()).getLeaderPromotion()
+		pl = u.plot()
+		can = [pl.getUnit(k) for k in range(pl.getNumUnits()) if pl.getUnit(k).getOwner() == u.getOwner()
+			and pl.getUnit(k).getID() != u.getID() and pl.getUnit(k).canPromote(promo, u.getID())]
+		want = args.get("unit")
+		pick = [v for v in can if v.getID() == want]
+		if not pick:
+			raise Exception("LEAD needs the unit to join: civ do %d LEAD <unit id>. Units here that can take it: %s" % (u.getID(),
+				", ".join(["#%d %s" % (v.getID(), gc.getUnitInfo(v.getUnitType()).getDescription()) for v in can]) or "none"))
+		v = pick[0]
+		if not u.lead(v.getID()):
+			raise Exception("the game refused: %s can't lead %s now" % (gc.getUnitInfo(u.getUnitType()).getDescription(),
+				gc.getUnitInfo(v.getUnitType()).getDescription()))
+		c2 = loadClaims()
+		if c2.has_key(u.getID()):
+			del c2[u.getID()]
+			saveClaims(c2)
+		return {"led": "#%d %s now carries the general (%s)" % (v.getID(), gc.getUnitInfo(v.getUnitType()).getDescription(),
+			gc.getPromotionInfo(promo).getDescription())}
 	if targeted:
 		if not args.has_key("x"):
 			raise Exception("%s needs a target: civ do %d %s X Y" % (name, u.getID(), name))

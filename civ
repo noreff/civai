@@ -13,7 +13,7 @@
   civ player <name|civ|id> a player I have met
   civ move <id> X Y        walk a unit to X Y (several turns if needed); the unit becomes Claude's
   civ actions <unit id>    what the unit can do right now (the game's own buttons)
-  civ do <unit id> <action> [X Y] [--queue]
+  civ do <unit id> <action> [X Y | unit id] [--queue]   (LEAD <unit id>: a Great General joins that unit)
                            do one: FORTIFY, SENTRY, FOUND, BUILD_FARM, BUILD_ROAD, PILLAGE,
                            PROMOTE_COMBAT1, UPGRADE_..., AUTO_BUILD, AUTO_EXPLORE, ...;
                            MOVE_TO / ROUTE_TO take X Y; the unit stays Claude's (AUTO_ hands
@@ -438,6 +438,8 @@ def main(argv):
             args = {"id": int(words[0]), "action": words[1]}
             if len(words) > 3:
                 args["x"], args["y"] = int(words[2]), int(words[3])
+            elif len(words) == 3:
+                args["unit"] = int(words[2].lstrip("#"))   # LEAD <unit id>
             if "--queue" in argv:
                 args["queue"] = True
             print(fmt_record(call("do", args)))
