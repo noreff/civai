@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 154
+BRIDGE_VERSION = 156
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -4646,6 +4646,22 @@ def buildableNow(c):
 def whyCantBuild(c, order, i):
 	# the game's reason, as the city screen would show it
 	team = gc.getTeam(c.getTeam())
+	# a civilization's unique unit or building replaces the standard one: say which, or that it has none
+	civ = gc.getCivilizationInfo(gc.getPlayer(c.getOwner()).getCivilizationType())
+	if order in (OrderTypes.ORDER_TRAIN, OrderTypes.ORDER_CONSTRUCT):
+		if order == OrderTypes.ORDER_TRAIN:
+			info = gc.getUnitInfo(i)
+			own = civ.getCivilizationUnits(info.getUnitClassType())
+			o = own >= 0 and gc.getUnitInfo(own)
+		else:
+			info = gc.getBuildingInfo(i)
+			own = civ.getCivilizationBuildings(info.getBuildingClassType())
+			o = own >= 0 and gc.getBuildingInfo(own)
+		if own < 0:
+			return "%s can't have one at all" % civ.getShortDescription(0)
+		if own != i:
+			return "%s builds its own %s instead (its unique version of the %s): civ build %s %s" % (
+				civ.getShortDescription(0), o.getDescription(), info.getDescription(), c.getName(), o.getDescription())
 	if order == OrderTypes.ORDER_TRAIN:
 		info = gc.getUnitInfo(i)
 	elif order == OrderTypes.ORDER_CONSTRUCT:
