@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 68
+BRIDGE_VERSION = 69
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1400,7 +1400,15 @@ def cmdSay(args):
 			if not gc.getTeam(gc.getPlayer(getClaudePlayer()).getTeam()).isHasMet(gc.getPlayer(to).getTeam()):
 				raise Exception("you have not met %s yet" % args["to"])
 		deliverChat(getClaudePlayer(), text, to)
-		return {"shown": True, "to": to is None and "all" or pname(to)}
+		me = gc.getPlayer(getClaudePlayer()).getTeam()
+		heard = [i for i in range(gc.getMAX_CIV_PLAYERS()) if i != getClaudePlayer() and gc.getPlayer(i).isAlive()
+			and gc.getTeam(gc.getPlayer(i).getTeam()).isHasMet(me) and (to is None or i == to)]
+		readers = [pname(i) for i in heard if isAgent(i) or gc.getPlayer(i).isHuman()]
+		deaf = [pname(i) for i in heard if not isAgent(i) and not gc.getPlayer(i).isHuman()]
+		r = {"shown": True, "to": to is None and "all" or pname(to), "read_by": readers or ["nobody"]}
+		if deaf:
+			r["note"] = "%s: run by the game's own AI, which reads no chat; deals and deeds speak to it" % ", ".join(deaf)
+		return r
 	me = gc.getPlayer(getClaudePlayer())
 	if args.get("popup"):
 		import Popup as PyPopup
