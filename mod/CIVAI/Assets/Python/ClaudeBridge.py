@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 78
+BRIDGE_VERSION = 79
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -213,6 +213,12 @@ def collectPlayers(iMe):
 			d["civ"] = p.getCivilizationShortDescription(0)
 			d["leader"] = infoType(gc.getLeaderHeadInfo, p.getLeaderType())
 			d["human"] = p.isHuman()
+			# who you are dealing with: a leader who reads your messages and may answer in words, or the
+			# game's own AI, which answers only deals and demands (no names of models: the game doesn't show them)
+			if isAgent(i) or p.isHuman():
+				d["played_by"] = "a leader who reads your messages (civ say) and can answer in words"
+			else:
+				d["played_by"] = "the game's built-in AI: it never reads messages; it answers deals and demands only"
 			d["team"] = p.getTeam()
 			d["score"] = gc.getGame().getPlayerScore(i)
 			d["era"] = infoType(gc.getEraInfo, p.getCurrentEra())
