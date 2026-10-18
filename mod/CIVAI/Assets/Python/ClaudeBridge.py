@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 144
+BRIDGE_VERSION = 145
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -2396,6 +2396,10 @@ def cmdDo(args):
 	r = {"id": u.getID(), "done": name, "at": (u.getX(), u.getY()), "moves_left": u.movesLeft() / gc.getMOVE_DENOMINATOR()}
 	if g.getLengthMissionQueue():
 		r["orders_queued"] = g.getLengthMissionQueue()
+		if not u.movesLeft():
+			# no moves left: the order waits in the queue and runs when the unit has moves again (next turn)
+			del r["done"]
+			r["queued"] = "%s: not done yet; it runs when the unit has moves again (next turn)" % name
 	else:
 		# an order that takes effect at once (fortify, sleep, sentry...) leaves no queue; say what the unit does now
 		r["now"] = unitActivity(u)
