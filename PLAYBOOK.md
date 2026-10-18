@@ -52,6 +52,7 @@ The brief's header says which kind of wake-up this is:
 - **Audience:** someone wrote to you or asks for something. Decide what they really want, what it is worth to you and what it tells you about them; answer as yourself, refuse, or ignore on purpose, and write the exchange into their dossier.
 - **Founding:** your first wake-up. Take the throne: write `persona.md`, `ambitions.md` and `plan.md`, then play the turn.
 - **Fall:** your civilization has no cities and no units left. The last wake-up: close your chronicle, and say last words if you want.
+- **End:** the game is over (someone won). The last wake-up: close your chronicle, and say last words if you want.
 
 The game always waits for you: the turn doesn't end until you say `civ ready` (an audience doesn't need it). Every civilization plays the same turn at the same time, so an order runs when you give it.
 

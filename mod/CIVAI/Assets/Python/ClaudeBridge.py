@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 123
+BRIDGE_VERSION = 124
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3893,6 +3893,9 @@ def cmdVictory(args):
 	scores.reverse()
 	r = {"turn": "%d of %d" % (g.getGameTurn(), g.getMaxTurns() or g.getEstimateEndTurn()),
 		"scores": ", ".join(["%s %d" % (n, sc) for sc, n in scores])}
+	if g.getWinner() >= 0:
+		r["winner"] = gc.getTeam(g.getWinner()).getName()
+		r["won_by"] = g.getVictory() >= 0 and gc.getVictoryInfo(g.getVictory()).getDescription() or "-"
 	ships = ["%s arrives in %d turns" % (gc.getTeam(t).getName(), gc.getTeam(t).getVictoryCountdown(v))
 		for t in range(gc.getMAX_CIV_TEAMS()) for v in range(gc.getNumVictoryInfos())
 		if gc.getTeam(t).isAlive() and gc.getTeam(t).getVictoryCountdown(v) > 0]

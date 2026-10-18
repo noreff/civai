@@ -459,6 +459,12 @@ def council_every(cfg):
     return 10
 
 
+def game_over():
+    # the game has a winner: (winner, how) from the Victory screen, else None
+    v = raw("victory")
+    return v.get("winner") and (v["winner"], v.get("won_by", "-"))
+
+
 def fallen():
     # the game lists only living civilizations: a seat missing from its own status has no cities and no units left
     s = raw("status")
@@ -470,7 +476,7 @@ def wake_kind(d, events, reasons, st, turn, cfg):
     or asks), turn, or fall (the civilization is gone: the last wake-up). Decided here from the events, whatever
     the bridge's gate settings are."""
     if st.get("fallen") is not None:
-        return "fall"
+        return st.get("end_kind", "fall")
     persona = os.path.join(d, "persona.md")
     if not os.path.exists(persona) or not open(persona).read().strip():
         return "founding"
@@ -545,6 +551,10 @@ CLOSINGS = {
                 "you value; how you treat strangers and rivals; how you bargain; when you keep your word and when you "
                 "break it; how you mean to win. Then `ambitions.md` (2-3 goals with turns) and `plan.md`. Then play the "
                 "turn: found your capital, set research and builds, `civ ready`.",
+    "end": "The game is over (the reason above says who won and how), and this is your last wake-up. There are no "
+           "orders to give and no `civ ready` to say. Close your story: the last lines of `chronicle.md` (how the game "
+           "went for you and why, as you see it: what you would do again and what not), and if you want, last words "
+           "to the other leaders (`civ say`).",
     "fall": "Your civilization has fallen: no cities and no units are left, and this is your last wake-up. There are "
             "no orders to give and no `civ ready` to say. Close your story: the last lines of `chronicle.md` (how it "
             "ended, and why, as you see it), and if you want, last words to the other leaders (`civ say`).",
@@ -911,7 +921,7 @@ def handle(cfg, d, st, events, chat, reasons):
     # only for the turn this wake-up was for: if the agent said ready and the game moved on, the next turn is not ours to end
     same_turn = re.search(r"^turn:\s+%s\s*$" % start_turn, gate, re.M) is not None
     if (any(r.startswith(("turn ", "player_waiting")) for r in reasons) or "claude_wake" in " ".join(reasons)) \
-            and "ready:           no" in gate and not error and same_turn and kind != "fall":
+            and "ready:           no" in gate and not error and same_turn and kind not in ("fall", "end"):
         civ("ready")
         forced = True
     st["wakes"] = st.get("wakes", 0) + 1
@@ -1061,7 +1071,7 @@ def main():
     st = load_state(d)
     print("CIVAI loop on game %s (agent: %s)" % (gid, cfg["agent"][0]), flush=True)
     if st.get("fall_done") and not dry:
-        print("this civilization fell on turn %s and has had its last wake-up: nothing to do" % st["fallen"], flush=True)
+        print("this seat's game ended on turn %s and it has had its last wake-up: nothing to do" % st["fallen"], flush=True)
         return
     failures = 0
     last_gate = last_alive = 0
@@ -1077,7 +1087,14 @@ def main():
                 reasons = reasons + ["turn %s: turn (the turn waits for you)" % g.get("turn")]
             look = st.get("fallen") is not None or time.time() - last_alive > 60   # a full status, once a minute
             last_alive = time.time() if look else last_alive
-            if look and fallen():
+            over = look and game_over()
+            if over:
+                # the game is won: every leader gets one last wake-up (the same ending as a fallen civilization's)
+                if st.get("fallen") is None:
+                    st["fallen"], st["end_kind"] = game_turn(), "end"
+                    print(time.strftime("%H:%M:%S"), "the game is over (%s won by %s): one last wake-up" % over, flush=True)
+                reasons = reasons + ["end: the game is over; %s won (%s)" % over]
+            elif look and fallen():
                 if st.get("fallen") is None:
                     st["fallen"] = game_turn()
                     print(time.strftime("%H:%M:%S"), "the civilization has fallen on turn %s: one last wake-up" % st["fallen"],
@@ -1117,7 +1134,8 @@ def main():
             # the last wake-up is done (or could not be had): the seat's loop ends; nothing in the game waits on it
             st["events_pos"], st["chat_pos"], st["fall_done"] = epos, cpos, True
             save_state(d, st)
-            print(time.strftime("%H:%M:%S"), "the civilization has fallen: the seat's loop ends", flush=True)
+            print(time.strftime("%H:%M:%S"), "%s: the seat's loop ends" % (st.get("end_kind") == "end" and "the game is over"
+                  or "the civilization has fallen"), flush=True)
             return
         if error and not once:
             # the agent never got to play (usage limit, network, crash): keep these events for the next try,
