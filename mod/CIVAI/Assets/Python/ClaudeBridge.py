@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 53
+BRIDGE_VERSION = 54
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -2134,6 +2134,12 @@ def findDeals(old, new, kind, who, onlyTreaties=False):
 			r["we_gave"].append("%d gold" % -r["gold"])
 		if not (r["we_gave"] or r["we_got"] or r["permanent"]):
 			continue
+		if engineControl():
+			# with the engine nobody can deal for Claude: an unexplained change is a bug or a game rule
+			# (a gift, a capture, a hut...) for the director to look at, not a deal for Claude to seal
+			writeEvent("unexplained_change", {"with": pname(i), "window": kind, "we_gave": r["we_gave"], "we_got": r["we_got"],
+				"permanent": r["permanent"], "turn": gc.getGame().getGameTurn()})
+			continue
 		if o is None:
 			o = loadSeal()
 		n = o["next"]
@@ -2660,6 +2666,10 @@ def cmdOffer(args):
 		checkItem(iMe, other, it)
 	for it in get:
 		checkItem(other, iMe, it)
+	atWar = gc.getTeam(iTeam).isAtWar(gc.getPlayer(other).getTeam())
+	if atWar and engineReady() and "peace" not in [x[0] for x in give + get]:
+		raise Exception("we are at war with %s: any deal with them ends the war by the game's rule. Put peace in the "
+			"deal (--give peace --get peace ...) if you want that" % pname(other))
 	if not gc.getPlayer(other).isHuman() and not aiWillingToTalk(other, iMe):
 		why = "%s refuses to talk to us for now (the game's diplomacy screen stays closed); try again in a later turn" % pname(other)
 		if gc.getTeam(iTeam).isAtWar(gc.getPlayer(other).getTeam()):
@@ -3464,6 +3474,15 @@ def aiChooseProduction(gu, argsList):
 			for (order, data) in q:
 				c.pushOrder(OrderTypes(order), data, -1, False, False, True, False)
 		if c.getOrderQueueLength() > 0:
+			return True
+		if engineControl():
+			# nothing on Claude's list can be built any more (a wonder finished elsewhere...): wait for him
+			d[cityKey(c)] = []
+			saveCityClaims(d)
+			if not g_queueWaiting.has_key(cityKey(c)):
+				g_queueWaiting[cityKey(c)] = True
+				writeEvent("city_queue_done", {"city": c.getName(), "note": "nothing on your build list here can be built "
+					"any more; the city builds nothing until you `civ build` (or `civ build %s auto`)" % c.getName()})
 			return True
 	elif q is not None and c.getOwner() == getClaudePlayer():
 		if engineControl():
