@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 166
+BRIDGE_VERSION = 167
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -2468,6 +2468,19 @@ def doSpyMission(u, want):
 	refreshSnapshot()
 	alive = gc.getPlayer(u.getOwner()).getUnit(u.getID())
 	if after < before:
+		# the victim hears what the game would show its screen: what was done and where, not by whom
+		try:
+			city = u.plot().getPlotCity()
+			where = city and not city.isNone() and city.getName() or ("%d,%d" % (u.getX(), u.getY()))
+			if isAgent(target):
+				prev = actAs(target)
+				try:
+					writeEvent("espionage_against_us", {"mission": name, "where": where,
+						"text": "enemy infiltrators carried out %s at %s (the game does not say whose)" % (name, where)})
+				finally:
+					actAs(prev)
+		except:
+			log("espionage notice FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 		r = {"mission": name, "against": pname(target), "points_spent": before - after}
 		if alive and not alive.isNone():
 			r["spy"] = "escaped to (%d,%d)" % (alive.getX(), alive.getY())
