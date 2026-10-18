@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 85
+BRIDGE_VERSION = 86
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1275,6 +1275,8 @@ def aiUnitUpdate(gu, argsList):
 				"the unit waits (civ actions %d)" % u.getID()})
 			g.pushMission(MissionTypes.MISSION_SKIP, -1, -1, 0, False, False, MissionAITypes.NO_MISSIONAI, u.plot(), u)
 		return 1
+	if g.getLengthMissionQueue() > 0:
+		return 1   # an order of the agent's is under way (a multi-turn move, a worker's job): leave it to run
 	t = cl.get("target")
 	if t and (u.getX(), u.getY()) != (t[0], t[1]):
 		# the pathfinder only knows revealed tiles: aim at the target itself, or else at the
