@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 105
+BRIDGE_VERSION = 106
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3456,7 +3456,9 @@ def answerProposal(n, yes, why=None):
 		if c == "demand_tribute" and not yes and ai.AI_demandRebukedWar(iMe):
 			ai.handleDiploEvent(DiploEventTypes.DIPLOEVENT_DEMAND_WAR, iMe, -1, -1)
 			done.append("%s declares war" % pname(v["from"]))
-	del o["open"][str(n)]
+	o = loadProposals()   # a deal or answer can raise new proposals meanwhile (a vote, an AI's reply): keep them
+	if o["open"].has_key(str(n)):
+		del o["open"][str(n)]
 	closeNote(o, n, why == "no answer in time" and "nobody answered it by the end of turn %d" % (v["turn"] + 1)
 		or "answered %s on turn %d" % (yes and "yes" or "no", gc.getGame().getGameTurn()))
 	saveProposals(o)
@@ -3506,7 +3508,9 @@ def answerVote(o, n, v, why):
 	else:
 		choice = {"yes": PlayerVoteTypes.PLAYER_VOTE_YES, "no": PlayerVoteTypes.PLAYER_VOTE_NO}.get(a, PlayerVoteTypes.PLAYER_VOTE_ABSTAIN)
 	gc.getGame().castVote(iMe, v["data"], choice)
-	del o["open"][str(n)]
+	o = loadProposals()   # counting a vote can trigger the next one: keep it
+	if o["open"].has_key(str(n)):
+		del o["open"][str(n)]
 	saveProposals(o)
 	writeEvent("proposal_answered", {"id": int(n), "answer": a or "abstain", "what": voteText(v)})
 	return {"id": int(n), "voted": a or "abstain", "vote": voteText(v)}
@@ -3554,7 +3558,9 @@ def answerChoice(o, n, v, a):
 		if not p.claudeApplyEvent(e, v["data"]):
 			raise Exception("the game no longer allows that option")
 		done = "chose: %s" % gc.getEventInfo(e).getDescription()
-	del o["open"][str(n)]
+	o = loadProposals()   # the choice may raise new proposals meanwhile: keep them
+	if o["open"].has_key(str(n)):
+		del o["open"][str(n)]
 	saveProposals(o)
 	refreshSnapshot()
 	writeEvent("proposal_answered", {"id": int(n), "answer": a, "what": choiceText(v), "result": [done]})
@@ -3627,7 +3633,11 @@ def answerElection(o, n, v, a):
 			raise Exception("answer with the option's number, 1 to %d" % len(v["options"]))
 	if not gc.getGame().claudeChooseElection(v["data"], i):
 		raise Exception("the game no longer has this election open")
-	del o["open"][str(n)]
+	# the choice starts the vote at once and puts a ballot in this seat's proposals: read them again, or this
+	# save would wipe that ballot
+	o = loadProposals()
+	if o["open"].has_key(str(n)):
+		del o["open"][str(n)]
 	what = i >= 0 and v["options"][i] or "the game's own pick (no answer in time)"
 	closeNote(o, n, "resolution chosen: %s" % what)
 	saveProposals(o)
