@@ -28,8 +28,13 @@ SYSTEM_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out", "s
 BRIDGE = os.path.expanduser("~/Library/Application Support/CrossOver/Bottles/%s/drive_c/claude_bridge" % os.environ.get("CIV_BOTTLE", "civ4"))
 EVENTS = os.path.join(BRIDGE, "events.jsonl")
 CHAT = os.path.join(BRIDGE, "chat.jsonl")
-WAKE_KINDS = ("message_from_player", "claude_wake", "player_waiting", "deal_done", "deal_declined",
-              "deal_failed", "native_deal", "proposal")
+WAKE_KINDS = ("message_from_player", "message_from_leader", "claude_wake", "player_waiting", "deal_done",
+              "deal_declined", "deal_failed", "native_deal", "proposal")
+# kinds of wake-up (the brief's header, its closing and the effort follow the kind)
+ALARM_KINDS = ("first_contact", "war_declared", "peace_made", "city_changed_hands", "city_razed", "treasury_empty")
+AUDIENCE_KINDS = ("message_from_leader", "message_from_player", "proposal")
+AUDIENCE_PER_TURN = 3       # wake-ups outside a turn for messages and proposals, per turn (no endless ping-pong)
+COUNCIL_EVERY = {"GAMESPEED_QUICK": 8, "GAMESPEED_NORMAL": 10, "GAMESPEED_EPIC": 15, "GAMESPEED_MARATHON": 25}
 NOISE = ("auto_ready", "claude_ready", "my_turn_begins", "player_turn_begins", "combat_animal")
 MEMORY = ("persona.md", "ambitions.md", "plan.md", "secrets.md", "chronicle.md")
 CHAT_LINES = 30             # recent chat shown on every wake-up, new lines marked
@@ -317,11 +322,11 @@ def summarize_commands(cmds):
             looks += 1
         elif words[0] != "think":
             other.append("civ " + c[:120])
-    parts = ["said " + " / ".join(said) if said else "said nothing"]
+    parts = ["said " + " / ".join(said)] if said else []
     parts += ["moved %s to %s" % (" ".join(ids), xy) for xy, ids in moves.items()]
     parts += ["%s: %s" % (a, " ".join(ids)) for a, ids in dos.items()]
     parts += other
-    return "; ".join(parts)
+    return "; ".join(parts) or "only looked"
 
 
 def record_of_wakes(d, n=3):
@@ -438,12 +443,107 @@ def ledger_lines():
     return out
 
 
+def council_every(cfg):
+    # one council every few turns, scaled by the game's speed (manifest.json), unless the config sets it
+    if cfg.get("council_every"):
+        return int(cfg["council_every"])
+    if SEAT:
+        try:
+            m = json.load(open(os.path.join(HERE, "games", SEAT["game"], "manifest.json")))[-1]
+            sp = re.search(r"'speed': '(\w+)'", m.get("game_settings", ""))
+            if sp and sp.group(1) in COUNCIL_EVERY:
+                return COUNCIL_EVERY[sp.group(1)]
+        except (OSError, ValueError, IndexError, KeyError):
+            pass
+    return 10
+
+
+def wake_kind(d, events, reasons, st, turn, cfg):
+    """founding (no persona yet), council (every few turns, or a turn with big news), audience (someone wrote
+    or asks), or turn. Decided here from the events, whatever the bridge's gate settings are."""
+    persona = os.path.join(d, "persona.md")
+    if not os.path.exists(persona) or not open(persona).read().strip():
+        return "founding"
+    turn_wake = any(r.startswith(("turn ", "player_waiting")) for r in reasons)
+    news = [e for e in events if e.get("kind") in ALARM_KINDS]
+    if turn_wake and isinstance(turn, int) and (news or turn - st.get("last_council", -999) >= council_every(cfg)):
+        return "council"
+    if any(e.get("kind") in AUDIENCE_KINDS for e in events):
+        return "audience"
+    return "turn" if turn_wake else "audience"
+
+
+def dossier_line(d, name):
+    # the Stance line of this leader's dossier, or what is missing
+    dd = os.path.join(d, "dossiers")
+    first = name.split(" (")[0].split(" of ")[0].lower()
+    files = [f for f in (os.listdir(dd) if os.path.isdir(dd) else []) if first.split()[0] in f.lower().replace("_", " ")]
+    if not files:
+        return "no dossier yet"
+    text = open(os.path.join(dd, files[0])).read()
+    m = re.search(r"^\W*Stance:?\**\s*(.+)$", text, re.M | re.I)
+    return "Stance: " + m.group(1).strip()[:140] if m else "dossier has no Stance line"
+
+
+def court_lines(d):
+    """One line per leader met: who reads messages, standing, open deals, your stance, and when words last passed
+    between you, from the game's records (facts only)."""
+    status = civ("status", "--brief").splitlines()
+    others = status[status.index("Others:") + 1:] if "Others:" in status else []
+    said = []
+    p = os.path.join(d, "said.jsonl")
+    if os.path.exists(p):
+        for l in open(p):
+            try:
+                said.append(json.loads(l))
+            except ValueError:
+                pass
+    chat = timeline.read(CHAT, timeline.chat_rewind)
+    deals = raw("deals").get("deals") or []
+    out = []
+    for line in others:
+        m = re.match(r"\s+(.+?) of (.+?)(?: \[HUMAN\])?(?: \((reads and answers messages|built-in AI: answers deals only)\))?: (.+)$", line)
+        if not m:
+            continue
+        leader, civname, who, rest = m.group(1), m.group(2), m.group(3) or "", m.group(4)
+        full = "%s (%s)" % (leader, civname)
+        mine = [r.get("turn") for r in said if r.get("to") == full or (r.get("to") == "all" and full in (r.get("read_by") or []))]
+        theirs = [c.get("turn") for c in chat if str(c.get("from", "")).startswith(leader)]
+        n = sum(1 for x in deals if leader in x)
+        talk = ""
+        if who.startswith("reads"):
+            talk = "; you last wrote to them: %s; they last wrote to you: %s" % (
+                "T%s" % max(mine) if mine else "never", "T%s" % max(theirs) if theirs else "never")
+        out.append("- **%s** (%s): %s; open deals: %d%s; %s" % (full, "talks" if who.startswith("reads") else "built-in AI",
+                   rest, n, talk, dossier_line(d, leader)))
+    return out
+
+
+CLOSINGS = {
+    "turn": "Do the turn's work. If anything above changes what you think of a leader or what you plan, write it in the "
+            "file it belongs to. Then `civ ready`, and one line of journal: what you wanted, what you got.",
+    "council": "Before `civ ready`, hold council, and write the answers in your journal: (1) Am I winning, and by which "
+               "road? (2) Who is my greatest threat and my best partner now; what changed? (3) What do I want from someone "
+               "that I could ask for, offer or threaten today? If you decide to say it, say it now; if you decide not to, "
+               "name the leader and the reason. (4) What must have happened by the next council? Update `plan.md`, "
+               "`ambitions.md` and the dossiers that changed (every leader you have met gets a dossier with a Stance "
+               "line). Then the turn's orders and `civ ready`.",
+    "audience": "Someone spoke to you or asks something of you (above). What do they want, what is it worth to you, and "
+                "what does it tell you about them? Answer as yourself (`civ say --think \"...\" \"...\"`, `civ answer`, "
+                "`civ offer`), refuse, or ignore on purpose, and write the exchange into their dossier.",
+    "founding": "You have just taken the throne. Write `persona.md` in your own words, under 120 words: your voice; what "
+                "you value; how you treat strangers and rivals; how you bargain; when you keep your word and when you "
+                "break it; how you mean to win. Then `ambitions.md` (2-3 goals with turns) and `plan.md`. Then play the "
+                "turn: found your capital, set research and builds, `civ ready`.",
+}
+
+
 def inbox(d):
     p = os.path.join(d, "director_inbox.md")
     return open(p).read().strip() if os.path.exists(p) else ""
 
 
-def prompt_v2(d, events, chat, reasons, rec_dir=None):
+def prompt_v2(d, events, chat, reasons, rec_dir=None, kind="turn"):
     """The wake-up message: why you are woken first, then who you are and what you planned, what you
     really did lately (from the logs), the others, the state, the chat, the map; the reason again last."""
     rec_dir = rec_dir or d
@@ -451,7 +551,7 @@ def prompt_v2(d, events, chat, reasons, rec_dir=None):
     turn = game_turn()
     turn_wake = any(r.startswith(("turn ", "player_waiting")) for r in reasons)
     status = civ("status", "--brief").splitlines()
-    W = ["# TURN %s. %s" % (turn, " ".join(status[1:3]) if len(status) > 2 else ""), "",
+    W = ["# TURN %s · %s. %s" % (turn, kind.upper(), " ".join(status[1:3]) if len(status) > 2 else ""), "",
          "Woken by: " + "; ".join(reasons), ""]
     shown = [fmt_event(e) for e in events if e.get("kind") not in NOISE]
     W += ["## Since your last wake-up", ""] + (shown[-BRIEF_EVENTS:] or ["(no game events)"])
@@ -481,22 +581,26 @@ def prompt_v2(d, events, chat, reasons, rec_dir=None):
                 for n in (sorted(os.listdir(dd)) if os.path.isdir(dd) else [])]
     parts.append("# YOUR LEDGER WITH THE OTHER LEADERS (the game's records: deals, gifts, cities, wars; your notes "
                  "can't change it)\n\n" + ("\n".join(ledger_lines()) or "(nothing has passed between you and anyone yet)"))
+    parts.append("# YOUR COURT (every leader you have met: who reads messages, standing, deals, your stance, when "
+                 "words last passed between you)\n\n" + ("\n".join(court_lines(d)) or "(you have met nobody yet)"))
+    if kind == "council":
+        parts.append("# STANDINGS (`civ victory`)\n\n" + civ("victory"))
     parts.append("# THE OTHER LEADERS (your dossiers)\n\n" + ("\n\n".join(dossiers) or "(none yet)"))
     parts.append("### chronicle.md\n\n" + (read("chronicle.md") or "(empty)"))
     parts.append("# STATE NOW\n\n" + state_section())
     parts.append("# HEARD AT COURT (the chat: lines to everyone and private ones to you; NEW = since your last "
                  "wake-up)\n\n" + ("\n".join(chat_lines(chat)) or "(nothing yet)"))
     parts.append("# MAP\n\n" + my_land_map())
-    parts.append("# YOUR MOVE\n\nWhat do you want to have happened by your next review? Decide, act with `civ` commands, "
-                 "and update your files.%s End with a short private journal entry: what you wanted, what you got, "
-                 "what you are holding back." % (" Finish the turn with `civ ready`." if turn_wake else ""))
+    close = CLOSINGS.get(kind, CLOSINGS["turn"])
+    if kind == "audience" and turn_wake:
+        close += " Then the turn's orders and `civ ready`."
+    parts.append("# YOUR MOVE (%s)\n\n%s" % (kind, close))
     system = "\n\n".join([
         "You are the leader in persona.md, playing the current CIVAI game to win. Each message is ONE wake-up: act on it and "
         "finish. You remember nothing between wake-ups except the files in the game folder, so before you finish, write "
         "down in them whatever your future self must know. The playbook below is your full instruction set.",
         "How you act: the Bash tool runs your `civ` commands (`~/civai/civ ...`; run independent lookups in parallel); "
-        "Read, Write and Edit work on your files in the game folder (read a file before you change it). "
-        "Keep tool output small: ask for what you need, not everything.",
+        "Read, Write and Edit work on your files in the game folder (read a file before you change it).",
         "# PLAYBOOK\n\n" + playbook_for_loop()])
     return system, "\n\n".join(parts)
 
@@ -683,7 +787,7 @@ def memory_added(d, base="HEAD", head=None):
 CHECK_TURNS = 5             # the self-check compares notes with the chat of this many recent turns
 
 
-def check_prompt(cmds, added, final_words, now=None):
+def check_prompt(cmds, added, final_words, now=None, kind="turn"):
     # the game's own record (this wake-up's actions, the recent chat) next to what the agent believes it did
     acts = ["civ " + c["cmd"] for c in cmds if c.get("cmd", "").split(" ")[0] not in LOOKUPS and c["cmd"].split(" ")[0] != "say"]
     now = game_turn() if now is None else now
@@ -712,8 +816,8 @@ def check_prompt(cmds, added, final_words, now=None):
         "Compare with this record the lines you added, your final words, and every note in your memory files "
         "about the last %d turns. If one says you said, offered, gave, answered, ordered or did something "
         "that is not in this record, either do it now with the real command or correct the note. If you promised "
-        "something in a message, it must be in plan.md with its turn. Then reply with one line: what you fixed, "
-        "or 'checked'." % CHECK_TURNS,
+        "something in a message, it must be in plan.md with its turn.%s Then reply with one line: what you fixed, "
+        "or 'checked'." % (CHECK_TURNS, " This was a council: which dossier or plan line did it change? If none, say why." if kind == "council" else ""),
     ])
 
 
@@ -729,8 +833,9 @@ def handle(cfg, d, st, events, chat, reasons):
     if cfg.get("shadow"):
         shadow_run(cfg, d, events, chat, reasons)
     v2 = cfg.get("prompt") == "v2"
+    kind = wake_kind(d, events, reasons, st, game_turn(), cfg)
     if v2:
-        system, prompt = prompt_v2(d, events, chat, reasons)   # the loop's own lookups happen here, before the marks
+        system, prompt = prompt_v2(d, events, chat, reasons, kind=kind)   # the loop's own lookups happen here, before the marks
         with open(SYSTEM_FILE_V2, "w") as f:
             f.write(system)
     else:
@@ -741,10 +846,17 @@ def handle(cfg, d, st, events, chat, reasons):
         turn = m.group(1)
     cmds_pos = os.path.getsize(cmds_path) if os.path.exists(cmds_path) else 0
     th_pos = os.path.getsize(thoughts_path) if os.path.exists(thoughts_path) else 0
-    deep = re.search(r"wrote|proposal|deal|review|war|city_changed|lost|enemy_near|first_contact", " ".join(reasons))
-    wcfg = dict(cfg, effort=cfg.get("effort_deep", "high")) if deep and cfg.get("effort_deep", "high") else cfg
+    # the same effort policy for every seat: a working turn at the seat's effort, a sitting that asks for judgment deeper
+    deep = cfg.get("effort_deep") or ("xhigh" if cfg.get("effort") in ("high", "xhigh") else "high")
+    wcfg = dict(cfg, effort=deep) if kind != "turn" else cfg
     out, secs, meta, error = run_agent(wcfg, prompt, system_file=sysf)
     meta["effort"] = wcfg.get("effort")
+    meta["kind"] = kind
+    if kind == "council" and not error:
+        st["last_council"] = game_turn()
+    if kind == "audience":
+        st.setdefault("audiences", {})
+        st["audiences"] = {str(game_turn()): st["audiences"].get(str(game_turn()), 0) + 1}
     if v2 and not error:
         archive_inbox(d)
     agent_cmds = [c for c in lines_since(cmds_path, cmds_pos) if c.get("by", "agent") == "agent"]   # not the director's
@@ -753,7 +865,7 @@ def handle(cfg, d, st, events, chat, reasons):
     if not error and meta.get("session_id") and (added or any(c.get("cmd", "").startswith("say") for c in agent_cmds)):
         # the same session checks its notes against the game's log and fixes what doesn't match
         pos = os.path.getsize(cmds_path) if os.path.exists(cmds_path) else 0
-        check, csecs, cmeta, cerr = run_agent(cfg, check_prompt(agent_cmds, added, out), resume=meta["session_id"],
+        check, csecs, cmeta, cerr = run_agent(cfg, check_prompt(agent_cmds, added, out, kind=kind), resume=meta["session_id"],
                                               system_file=sysf)
         fixed = [c for c in lines_since(cmds_path, pos) if c.get("by", "agent") == "agent"]
         agent_cmds += fixed
@@ -768,7 +880,7 @@ def handle(cfg, d, st, events, chat, reasons):
         forced = True
     st["wakes"] = st.get("wakes", 0) + 1
     log = ["# Wake-up %d, turn %s (%s)" % (st["wakes"], turn, time.strftime("%Y-%m-%d %H:%M:%S")), "",
-           "**Why:** " + "; ".join(reasons), "",
+           "**Why:** %s (%s)" % ("; ".join(reasons), kind), "",
            "**Thoughts:**", ""]
     log += ["- " + t.get("text", "") for t in lines_since(thoughts_path, th_pos)] or ["- (none)"]
     log += ["", "**Commands:**", ""]
@@ -885,6 +997,8 @@ def reasons_of(events):
             out.append("turn %s: %s" % (e.get("turn"), ", ".join(e.get("reasons", []))))
         elif k == "message_from_player":
             out.append('%s wrote: "%s"' % (human_name(), e.get("text")))
+        elif k == "message_from_leader":
+            out.append('%s wrote to %s: "%s"' % (e.get("from"), "you" if e.get("private") else "all", e.get("text")))
         else:
             out.append(k)
     return out
@@ -919,10 +1033,16 @@ def main():
             time.sleep(GATHER_SECONDS)              # let the burst finish
             events, epos = read_from(EVENTS, st["events_pos"])
             reasons = reasons_of(events) or reasons
+        if reasons and not any(r.startswith(("turn ", "player_waiting")) for r in reasons) and \
+                (st.get("audiences") or {}).get(str(game_turn()), 0) >= AUDIENCE_PER_TURN and not (once or dry):
+            # enough audiences this turn: these messages wait for the next turn's wake-up (they stay unread till then)
+            time.sleep(5)
+            continue
         chat, cpos = read_from(CHAT, st["chat_pos"])
         if dry:
             if "--v2" in sys.argv:
-                system, prompt = prompt_v2(d, events, chat, reasons or ["(dry run)"])
+                kind = sys.argv[sys.argv.index("--kind") + 1] if "--kind" in sys.argv else "turn"
+                system, prompt = prompt_v2(d, events, chat, reasons or ["(dry run)"], kind=kind)
                 print(prompt if "--system" not in sys.argv else system)
             else:
                 print(prompt_for(d, events, chat, reasons or ["(dry run)"]))

@@ -91,6 +91,7 @@
   civ hold                 take "ready" back: the player must wait for the next `civ ready`
   civ say "<text>"         chat line to the player in the game, from you
   civ say --popup "<text>" the same as a popup window
+  civ say --think "<thought>" "<text>"   the thought behind it and the message, in one call
   civ say --to <leader> "<text>"   (a game of several AI leaders) a private message only that leader
                            reads; without --to every leader who has met you reads it
   civ chat [N]             last N chat messages both ways (default 20); works without the game
@@ -256,8 +257,10 @@ def fmt_status(s, compact=False):
         if p["id"] == me or not p.get("met") or p.get("barbarian"):
             continue
         known = True
-        out.append("  %s of %s%s: score %s, era %s, attitude to me %s%s" % (
-            p["name"], p["civ"], " [HUMAN]" if p.get("human") else "", p.get("score"),
+        who = (" (reads and answers messages)" if str(p.get("played_by", "")).startswith("a leader who reads")
+               else " (built-in AI: answers deals only)" if p.get("played_by") else "")
+        out.append("  %s of %s%s%s: score %s, era %s, attitude to me %s%s" % (
+            p["name"], p["civ"], " [HUMAN]" if p.get("human") else "", who, p.get("score"),
             short(p.get("era")), short(p.get("their_attitude_to_me")),
             ", AT WAR" if p.get("at_war_with_me") else ""))
     unmet = sum(1 for p in players.values() if not p.get("met") and not p.get("barbarian"))
@@ -657,6 +660,14 @@ def main(argv):
         elif cmd == "release":
             print(fmt_record(call("release", {"id": argv[1] if argv[1] == "all" else int(argv[1])})))
         elif cmd == "say":
+            if "--think" in argv[:-1]:
+                # the thought and the message in one call: `civ say [--to X] --think "what I think" "message"`
+                i = argv.index("--think")
+                tid = uuid.uuid4().hex[:10]
+                video_log("thoughts.jsonl", {"id": tid, "text": argv[i + 1]})
+                with open(os.path.join(VIDEO_LOG_DIR, ".last_thought"), "w") as f:
+                    f.write(tid)
+                argv = argv[:i] + argv[i + 2:]
             if not os.path.exists(os.path.join(VIDEO_LOG_DIR, ".last_thought")):
                 # every message is paired with what its speaker really thinks (said vs thought, for the video and the record)
                 print('ERROR: first write what you really think and want behind this message: civ think "..." '

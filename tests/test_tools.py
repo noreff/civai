@@ -82,7 +82,7 @@ def test_record_is_built_from_commands():
     loop = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(loop)
     r = loop.summarize_commands(["status", "move 1 5 6", "move 2 5 6", "do 3 BOMBARD", "do 4 BOMBARD", "think x", "ready"])
-    assert r == "said nothing; moved #1 #2 to 5,6; BOMBARD: #3 #4; civ ready", r
+    assert r == "moved #1 #2 to 5,6; BOMBARD: #3 #4; civ ready", r   # silence is shown in the court table, not here
     assert loop.summarize_commands(["say Brother, hello"]).startswith('said "Brother, hello"')
 
 
