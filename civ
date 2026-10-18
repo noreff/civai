@@ -106,6 +106,7 @@ The game answers only while a game is loaded; commands wait up to 2 min.
 """
 import json
 import os
+import re
 import sys
 import subprocess
 import time
@@ -461,6 +462,17 @@ def video_log(name, record):
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def usage(cmd):
+    # this command's lines of the help above
+    lines, keep = [], False
+    for l in __doc__.splitlines():
+        if l.startswith("  civ "):
+            keep = l.split()[1] == cmd
+        if keep:
+            lines.append(l)
+    return "\n".join(lines) if lines else __doc__.strip()
+
+
 def main(argv):
     if argv and argv[0] not in ("-h", "--help", "help", "think", "events", "chat", "director"):
         video_log("commands.jsonl", {"cmd": " ".join(argv)[:500]})
@@ -469,14 +481,10 @@ def main(argv):
         return 0
     if "--help" in argv[1:] or "-h" in argv[1:]:
         # `civ <command> --help` is a question, never an order (a message "--help" once went to every leader)
-        lines, keep = [], False
-        for l in __doc__.splitlines():
-            if l.startswith("  civ "):
-                keep = l.split()[1] == argv[0]
-            if keep:
-                lines.append(l)
-        print("\n".join(lines) if lines else __doc__.strip())
+        print(usage(argv[0]))
         return 0
+    # coordinates written "18,21" mean 18 21
+    argv = [a for x in argv for a in (x.split(",") if re.fullmatch(r"-?\d+,-?\d+", x) else [x])]
     if os.environ.get("CIV_READONLY") == "1" and not read_only(argv):
         print("(test run: not sent to the game) civ %s" % " ".join(argv))
         return 0
@@ -701,6 +709,11 @@ def main(argv):
         else:
             print("unknown command: %s\n\n%s" % (cmd, __doc__.strip()), file=sys.stderr)
             return 2
+    except (IndexError, ValueError) as e:
+        # arguments that don't fit the command: say how it is written, not a Python traceback
+        print("ERROR: civ %s: the arguments don't fit (%s). It is written:\n%s" % (" ".join(argv), e, usage(cmd)),
+              file=sys.stderr)
+        return 2
     except BridgeError as e:
         text = str(e)
         if os.environ.get("CIV_DEV") != "1":
