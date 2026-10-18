@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 157
+BRIDGE_VERSION = 158
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -2744,6 +2744,12 @@ def cmdReligion(args):
 	saveOwnChoice(p, None)
 	return {"state_religion": religionName(p.getStateReligion()), "anarchy_turns": anarchy}
 
+def civicsOpenedByWonder(p):
+	# a wonder (The Pyramids: every Government civic) can open a whole category without its techs
+	cats = [gc.getCivicOptionInfo(o).getDescription() for o in range(gc.getNumCivicOptionInfos()) if p.isHasCivicOption(o)]
+	return cats and ("every %s civic is open to you without its tech: a wonder of yours grants it (e.g. The Pyramids "
+		"open all Government civics)" % " and ".join(cats)) or None
+
 def ownCivicsLock(p):
 	# the game's rule after Claude's own change (anarchy, then MIN_REVOLUTION_TURNS); a lock the
 	# built-in AI caused with a revolution the bridge undid doesn't count
@@ -2760,11 +2766,15 @@ def cmdCivics(args):
 	p = gc.getPlayer(getClaudePlayer())
 	cur = [p.getCivics(o) for o in range(gc.getNumCivicOptionInfos())]
 	if not args.get("names"):
-		return {"current": ["%s: %s" % (gc.getCivicOptionInfo(o).getDescription(), gc.getCivicInfo(cur[o]).getDescription())
+		r = {"current": ["%s: %s" % (gc.getCivicOptionInfo(o).getDescription(), gc.getCivicInfo(cur[o]).getDescription())
 				for o in range(len(cur))],
 			"can_adopt": [gc.getCivicInfo(c).getDescription() for c in range(gc.getNumCivicInfos())
 				if p.canDoCivics(c) and c not in cur],
 			"turns_until_allowed": ownCivicsLock(p)}
+		opened = civicsOpenedByWonder(p)
+		if opened:
+			r["opened_without_techs"] = opened
+		return r
 	new = list(cur)
 	for n in args["names"]:
 		c = findInfo(n, gc.getNumCivicInfos(), gc.getCivicInfo, "civic_")
@@ -4454,7 +4464,8 @@ def cmdRules(args):
 			upkeep = gc.getUpkeepInfo(info.getUpkeep()).getDescription()
 		return {"civic": info.getDescription(), "category": gc.getCivicOptionInfo(info.getCivicOptionType()).getDescription(),
 			"needs_tech": techList([info.getTechPrereq()]), "upkeep": upkeep,
-			"we_can_adopt": me.canDoCivics(i), "strategy": info.getStrategy(), "help": info.getHelp()}
+			"we_can_adopt": me.canDoCivics(i), "strategy": info.getStrategy(), "help": info.getHelp(),
+			"why_without_tech": me.isHasCivicOption(info.getCivicOptionType()) and civicsOpenedByWonder(me) or None}
 	i = findInfo(want, gc.getNumBuildInfos(), gc.getBuildInfo, "build_")
 	if i >= 0:
 		info = gc.getBuildInfo(i)
