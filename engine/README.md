@@ -34,5 +34,7 @@ The toolchain lives in ~/civai-sdk (VC++ Toolkit 2003 unpacked from Leoreth's SD
 
     ~/civai-sdk/build.sh ~/civai-sdk/src/claude ~/civai-sdk/build/claude 6    # about a minute
 
-Install: copy build/claude/CvGameCoreDLL.dll to Mods/CIVAI/Assets/ (needs a game restart; the
-stock DLL in Beyond the Sword/Assets stays untouched). The bridge works with both engines.
+Install: quit Civ, run `engine/install_engine.sh` (copies build/claude/CvGameCoreDLL.dll to Mods/CIVAI/Assets/;
+the stock DLL in Beyond the Sword/Assets stays untouched), start Civ normally and Load Game. Civ reloads the
+last mod by itself (CivilizationIV.ini: `Mod = Mods\CIVAI`); a `mod=` argument on the command line breaks it,
+and a save can't be loaded from the command line. The bridge works with both engines.
