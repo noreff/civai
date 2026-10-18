@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 50
+BRIDGE_VERSION = 51
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -887,6 +887,14 @@ def recordEvent(tag, a):
 		frm, to, comment, data, gives, wants = engineArgs(a)
 		if to == iMe:
 			newProposal(frm, commentName(comment), data, fromEngineText(gives), fromEngineText(wants))
+	elif tag == "claudeEvent":
+		me, trig, ttype, ids, text, options = engineArgs(a)
+		if me == iMe:
+			opts = [stripTags(u"%s" % x).strip() for x in (u"%s" % options).split(u"\n") if x.strip()]
+			newChoice("event", trig, stripTags(u"%s" % text) or gc.getEventTriggerInfo(ttype).getType(), opts)
+	elif tag == "claudeFreeTech":
+		if engineArgs(a)[0] == iMe:
+			newChoice("free_tech", 0, "Oracle, a first-to-discover bonus or the like", [])
 	elif tag == "claudeVote":
 		me, voteId, source, vote, player, cityId, other, text = engineArgs(a)
 		if me == iMe:
@@ -2775,6 +2783,8 @@ TRADES = ("offer_deal", "offer_peace", "offer_city", "offer_vassal", "give_help"
 def proposalText(v):
 	if v["comment"] == "vote":
 		return voteText(v)
+	if v["comment"] in ("event", "free_tech"):
+		return choiceText(v)
 	who = pname(v["from"])
 	gives = ", ".join([itemText(tuple(x)) for x in v["gives"]]) or "nothing"
 	wants = ", ".join([itemText(tuple(x)) for x in v["wants"]]) or "nothing"
@@ -2803,6 +2813,10 @@ def proposalText(v):
 	if c == "cancel_deal":
 		return "%s cancels a deal with you: %s / %s" % (who, gives, wants)
 	return "%s says something (%s)" % (who, c)
+
+def stripTags(t):
+	# game text carries markup such as <color=...> and [ICON_GOLD]; keep the words
+	return re.sub(u"<[^>]*>|\\[[A-Z_]+\\]", u"", t)
 
 def newProposal(frm, comment, data, gives, wants):
 	gives = [list(x) for x in gives]   # stored as JSON lists: compare in the same form
@@ -2900,11 +2914,70 @@ def answerVote(o, n, v, why):
 	writeEvent("proposal_answered", {"id": int(n), "answer": a or "abstain", "what": voteText(v)})
 	return {"id": int(n), "voted": a or "abstain", "vote": voteText(v)}
 
+def newChoice(kind, data, text, options):
+	# a random event / quest, or a free tech: Claude picks (`civ answer N <choice>`)
+	o = loadProposals()
+	if kind == "event":
+		for k, v in o["open"].items():
+			if v["comment"] == "event" and v["data"] == data:
+				return
+	iMe = getClaudePlayer()
+	v = {"from": iMe, "comment": kind, "data": data, "gives": [], "wants": [], "turn": gc.getGame().getGameTurn(),
+		"text": text, "options": options}
+	n = o["next"]
+	o["next"] = n + 1
+	o["open"][str(n)] = v
+	saveProposals(o)
+	writeEvent("proposal", {"id": n, "text": choiceText(v), "answer": choiceHow(n, v)})
+
+def choiceText(v):
+	if v["comment"] == "free_tech":
+		return "a free tech is yours to pick (%s)" % v["text"]
+	return "event: %s; options: %s" % (v["text"], " | ".join(v["options"]))
+
+def choiceHow(n, v):
+	if v["comment"] == "free_tech":
+		return "civ answer %d <tech> (any tech you can research now; it waits for you)" % n
+	return "civ answer %d <option number> (no answer by the end of next turn: the first option)" % n
+
+def answerChoice(o, n, v, a):
+	iMe = getClaudePlayer()
+	p = gc.getPlayer(iMe)
+	if v["comment"] == "free_tech":
+		t = findInfo(a, gc.getNumTechInfos(), gc.getTechInfo, "tech_")
+		if t < 0 or not p.canResearch(t, False):
+			raise Exception("pick a tech you can research now (civ research lists them)")
+		gc.getTeam(p.getTeam()).setHasTech(t, True, iMe, True, True)
+		done = "got %s for free" % gc.getTechInfo(t).getDescription()
+	else:
+		ids = [int(x.split(":")[0]) for x in v["options"]]
+		e = int(str(a).split(":")[0].strip().lstrip("#"))
+		if e not in ids:
+			raise Exception("pick one of the options: %s" % ", ".join([str(i) for i in ids]))
+		if not p.claudeApplyEvent(e, v["data"]):
+			raise Exception("the game no longer allows that option")
+		done = "chose: %s" % gc.getEventInfo(e).getDescription()
+	del o["open"][str(n)]
+	saveProposals(o)
+	refreshSnapshot()
+	writeEvent("proposal_answered", {"id": int(n), "answer": a, "what": choiceText(v), "result": [done]})
+	return {"id": int(n), "result": done}
+
 def expireProposals():
 	# a human must answer on the screen at once; Claude has until his next turn ends
 	now = gc.getGame().getGameTurn()
 	o = loadProposals()
 	for k, v in o["open"].items():
+		if v["comment"] == "free_tech":
+			continue
+		if v["comment"] == "event":
+			if v["turn"] < now and v["options"]:
+				try:
+					answerChoice(o, k, v, v["options"][0])
+				except:
+					del o["open"][k]
+					saveProposals(o)
+			continue
 		if v["comment"] == "vote":
 			if v["turn"] < now - 2:   # counted by now; a late vote would not count
 				del o["open"][k]
@@ -2927,6 +3000,8 @@ def cmdAnswer(args):
 	v = loadProposals()["open"].get(n)
 	if v is not None and v["comment"] == "vote":
 		return answerProposal(n, True, a)
+	if v is not None and v["comment"] in ("event", "free_tech"):
+		return answerChoice(loadProposals(), n, v, a)
 	return answerProposal(n, a.lower() in ("yes", "y", "accept", "ok"))
 
 def engineArgs(a):
