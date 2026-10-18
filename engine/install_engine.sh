@@ -3,7 +3,8 @@
 set -e
 BTS="$HOME/Library/Application Support/CrossOver/Bottles/${CIV_BOTTLE:-civ4}/drive_c/GOG Games/Civilization IV Complete/Civ4/Beyond the Sword"
 DST="$BTS/Mods/CIVAI/Assets/CvGameCoreDLL.dll"
-if ps -Ao command | grep -iq "[C]iv4BeyondSword"; then
+# started from the launcher the game runs as ".../Civilization IV - Beyond The Sword.app/Contents/MacOS/..."
+if ps -Ao command | grep -iqE "[C]iv4BeyondSword|[C]ivilization IV - Beyond The Sword\.app/Contents/MacOS"; then
 	echo "Civ is still running: save, quit, then run this again"; exit 1
 fi
 if [ "$1" = "--stock" ]; then
