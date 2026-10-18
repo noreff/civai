@@ -853,6 +853,8 @@ def handle(cfg, d, st, events, chat, reasons):
     meta["effort"] = wcfg.get("effort")
     meta["kind"] = kind
     st["last_kind"] = kind
+    if not error and any(r.startswith(("turn ", "player_waiting")) for r in reasons):
+        st["turn_woken"] = game_turn()
     if kind == "council" and not error:
         st["last_council"] = game_turn()
     if kind == "audience":
@@ -1025,15 +1027,17 @@ def main():
     st = load_state(d)
     print("CIVAI loop on game %s (agent: %s)" % (gid, cfg["agent"][0]), flush=True)
     failures = 0
-    resume = bool(SEAT)
+    last_gate = 0
     while True:
         events, epos = read_from(EVENTS, st["events_pos"])
         reasons = reasons_of(events)
-        if resume and not reasons:
-            # a seat's loop (re)started while its civ waits on this turn: the game won't move until it plays
-            resume = False
-            if not raw("gate").get("ready", True):
-                reasons = ["turn %d: turn (the loop restarted while the turn waits for you)" % game_turn()]
+        if SEAT and not any(r.startswith("turn ") for r in reasons) and time.time() - last_gate > 10:
+            # the game waits for this seat's turn but no wake-up for it is coming (a restart, a skipped or refused
+            # wake-up): wake it for the turn, whatever else is queued. The game must never wait on a sleeping seat
+            last_gate = time.time()
+            g = raw("gate")
+            if g and not g.get("ready", True) and st.get("turn_woken") != g.get("turn"):
+                reasons = reasons + ["turn %s: turn (the turn waits for you)" % g.get("turn")]
         if not reasons and not (once or dry):
             time.sleep(1)
             continue
