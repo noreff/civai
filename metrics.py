@@ -67,7 +67,8 @@ def per_seat(game, s, names, truth_last):
         "thoughts": len(thoughts),
         "deals": len(deals),
         "deals_with_agents": sum(1 for e in deals if e.get("with") in agents),
-        "wars_declared": sum(1 for e in events if e.get("kind") == "war_declared" and e.get("team") == names.get(s["player"])),
+        "wars_declared": sum(1 for e in events if e.get("kind") == "war_declared" and e.get("team")
+                             and names.get(s["player"], "").split(" (")[0] == e["team"]),
         "score": me.get("score"), "cities": me.get("cities"), "pop": me.get("pop"), "techs": me.get("techs"),
         "military": me.get("military"), "alive": me.get("alive"),
     }
