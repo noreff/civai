@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 133
+BRIDGE_VERSION = 134
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -2147,6 +2147,9 @@ def whyNoFound(u):
 		for dy in range(-r, r + 1):
 			q = CyMap().plot(u.getX() + dx, u.getY() + dy)
 			if not q.isNone() and q.isCity():
+				if not q.isRevealed(u.getTeam(), False):
+					# a city in the fog: the rule, not the city (a human sees only that FOUND isn't possible)
+					return "another city stands too close (cities must be more than %d tiles apart)" % r
 				return "%s at %d,%d is too close (cities must be more than %d tiles apart)" % (q.getPlotCity().getName(), q.getX(), q.getY(), r)
 	if u.movesLeft() <= 0:
 		return "the settler has no moves left this turn"
