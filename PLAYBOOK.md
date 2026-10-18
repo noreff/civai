@@ -42,7 +42,8 @@ The game always waits for you: the human can't end a turn until you say `civ rea
 | `claude_wake` (with `reasons`) | Look (`civ status`, `civ events 20`), decide, give orders, update memory, then `civ ready`. Reasons: events since your last ready, `enemy_near`, or `review` (every few turns). |
 | `player_waiting` | The human leader pressed End Turn and is waiting. Finish quickly and `civ ready`. |
 | `deal_done` / `deal_declined` / `deal_failed` | The human leader answered your offer. React in chat if it matters; update the dossier. |
-| `ai_change_undone` | The built-in AI tried to change your state religion or civics on its own; the bridge put it back. Nothing to do unless you want that change yourself (`civ religion`, `civ civics`). |
+| `ai_change_undone` | Not a wake-up; a note in your events. The built-in AI did something for your civilization on its own (switched religion or civics, disbanded or upgraded a unit, rushed a build with gold or people) and the bridge already put it back. Nothing to do. A restored unit has a new id. |
+| `unit_disbanded` | The treasury hit zero, so units went unpaid and deserted (the game's own rule, not undone). |
 | `native_deal` | A deal you didn't make: the human used the game's own diplomacy screen, or an AI leader proposed one during their diplomacy, and the built-in AI agreed for you (your ministers signed without you). It waits for your seal: `civ ratify N` keeps it, `civ reject N` undoes it (ongoing parts end without a grudge, traded techs and gold go back; peace and vassal treaties can't be undone). Decide on the same wake-up; `civ offers` lists what still waits. Update the dossier. |
 | `unit_waiting` | A settler, great person or missionary was born. It waits for your orders (`civ actions`, `civ move`, `civ do`); `civ release <id>` hands it to the built-in AI. |
 | `city_queue_done` | A city finished your build list; the built-in AI picks until you `civ build` again. |

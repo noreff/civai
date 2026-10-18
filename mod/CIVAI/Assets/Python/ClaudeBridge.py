@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 42
+BRIDGE_VERSION = 43
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -787,7 +787,9 @@ def recordEvent(tag, a):
 		except:
 			log("deal checkpoint FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 		g_turnOf[0] = a[1]
+		g_guardDue[0] = True   # undo what the last window changed before Claude looks at anything
 		if a[1] == iMe:
+			snapCities(gc.getPlayer(iMe))
 			writeEvent("my_turn_begins", {})
 		elif gc.getPlayer(a[1]).isHuman():
 			# fired before the game turn counter moves on: the player is about to play turn a[0] + 1
@@ -850,6 +852,13 @@ def recordEvent(tag, a):
 			if war:
 				kind = "war_declared"
 			writeEvent(kind, {"team": gc.getTeam(t1).getName(), "against": gc.getTeam(t2).getName()})
+	elif tag == "cityHurry" and a[0].getOwner() == iMe and g_window[0] == ("own", iMe):
+		undoHurry(a[0], int(a[1]))
+	elif tag == "unitKilled" and a[0].getOwner() == iMe and int(a[1]) < 0 and g_window[0] == ("own", iMe) and g_strike[0] > 0:
+		# the game's own rule: an empty treasury makes units desert (CvPlayer::doGold); that stays
+		g_strike[0] = g_strike[0] - 1
+		writeEvent("unit_disbanded", {"unit": gc.getUnitInfo(a[0].getUnitType()).getDescription(), "id": a[0].getID(),
+			"at": [a[0].getX(), a[0].getY()], "why": "the treasury was empty: units go unpaid and desert (the game's rule)"})
 	elif tag == "unitKilled" and a[0].getOwner() == iMe and int(a[1]) < 0 and g_window[0] == ("own", iMe):
 		# killed by nobody during our own between-turns processing: the built-in AI disbanding it
 		# (AI_doMilitary in "financial trouble") or upgrading it; put back in restoreDisbanded
@@ -1429,10 +1438,13 @@ def loadChoices():
 def saveChoices(c):
 	writeAtomic(CHOICES_FILE, toJson(c))
 
-def guardChoices():
+g_guardDue = [True]
+
+def guardChoices(force=False):
 	g_guardTick[0] = g_guardTick[0] + 1
-	if g_guardTick[0] % 25:
+	if g_guardTick[0] % 25 and not force and not g_guardDue[0]:
 		return
+	g_guardDue[0] = False
 	p = gc.getPlayer(getClaudePlayer())
 	if not p.isAlive():
 		return
@@ -1469,6 +1481,37 @@ def guardChoices():
 			"note": "the built-in AI changed this without your order; the bridge put it back"})
 
 g_disbanded = []
+g_strike = [0]
+g_citySnap = {}
+
+def snapCities(p):
+	# our cities as our between-turns processing starts, before the city AI may hurry anything
+	g_citySnap.clear()
+	(c, it) = p.firstCity(False)
+	while c and not c.isNone():
+		h = {}
+		for k in range(gc.getNumHurryInfos()):
+			h[k] = (c.hurryGold(k), c.hurryPopulation(k), c.hurryAngerLength(k))
+		g_citySnap[c.getID()] = {"production": c.getProduction(), "hurry": h}
+		(c, it) = p.nextCity(it, False)
+
+def undoHurry(c, h):
+	# the city AI rushed a build with our gold or people (CvCityAI::AI_doHurry): put both back
+	snap = g_citySnap.get(c.getID())
+	if not snap or not snap["hurry"].has_key(h):
+		log("hurry in %s not undone: no snapshot" % c.getName())
+		return
+	gold, pop, anger = snap["hurry"][h]
+	c.setProduction(snap["production"])
+	if gold:
+		gc.getPlayer(c.getOwner()).changeGold(gold)
+	if pop:
+		c.changePopulation(pop)
+	if anger:
+		c.changeHurryAngerTimer(-anger)
+	paid = [x for x in (pop and "%d population" % pop, gold and "%d gold" % gold) if x]
+	writeEvent("ai_change_undone", {"undone": ["%s: its build was rushed with %s" % (c.getName(), " and ".join(paid))],
+		"note": "the built-in AI rushed this build on its own; the bridge put the gold and people back (nothing to do)"})
 
 def restoreDisbanded(p):
 	if not g_disbanded or g_window[0] == ("own", getClaudePlayer()):
@@ -1481,9 +1524,18 @@ def restoreDisbanded(p):
 		upgraded = [pl.getUnit(k) for k in range(pl.getNumUnits()) if pl.getUnit(k).getOwner() == p.getID()
 			and pl.getUnit(k).getUnitType() != d["type"] and pl.getUnit(k).getExperience() == d["xp"]
 			and pl.getUnit(k).getLevel() == d["level"] and pl.getUnit(k).getGameTurnCreated() >= d["turn"] - 1]
-		if upgraded:
-			continue
 		u = p.initUnit(d["type"], d["x"], d["y"], UnitAITypes.NO_UNITAI, DirectionTypes.DIRECTION_SOUTH)
+		what = "disbanded"
+		if upgraded:
+			# the AI upgraded it with our gold: take the new unit away and pay the gold back
+			v = upgraded[0]
+			price = u.upgradePrice(v.getUnitType())
+			p.changeGold(price)
+			if claims.has_key(v.getID()):
+				claims[d["id"]] = claims[v.getID()]
+				del claims[v.getID()]
+			what = "upgraded to %s for %d gold (gold returned)" % (gc.getUnitInfo(v.getUnitType()).getDescription(), price)
+			v.kill(False, -1)
 		u.setExperience(d["xp"], -1)
 		u.setLevel(d["level"])
 		for k in d["promos"]:
@@ -1492,12 +1544,12 @@ def restoreDisbanded(p):
 		if claims.has_key(d["id"]):
 			claims[u.getID()] = claims[d["id"]]
 			del claims[d["id"]]
-		back.append("%s #%d disbanded at (%d,%d), back as #%d" % (gc.getUnitInfo(d["type"]).getDescription(),
-			d["id"], d["x"], d["y"], u.getID()))
+		back.append("%s #%d %s at (%d,%d), back as #%d" % (gc.getUnitInfo(d["type"]).getDescription(),
+			d["id"], what, d["x"], d["y"], u.getID()))
 	if back:
 		saveClaims(claims)
 		writeEvent("ai_change_undone", {"undone": back,
-			"note": "the built-in AI disbanded these to save gold; the bridge put them back (they still cost upkeep)"})
+			"note": "the built-in AI disbanded or upgraded these on its own; the bridge put them back (nothing to do)"})
 
 def restoreCityQueues(p):
 	# the game empties a city's queue whenever its AI re-plans production (civics, techs...), and in
@@ -1665,6 +1717,9 @@ def doGoldHook(gu, argsList):
 					applyBudget(p, before)
 					writeEvent("budget_suspended", {"note": "your split would leave us below zero gold this turn; "
 						"the built-in AI's split was used instead", "split": before})
+			g_strike[0] = 0
+			if p.getGold() + p.calculateGoldRate() < 0 and p.getNumCities() > 0:
+				g_strike[0] = (p.getStrikeTurns() + 1) / 2   # how many units the game itself disbands now
 	except:
 		log("doGold hook FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 	return gu._claudeOrigDoGold(argsList)
@@ -2860,7 +2915,7 @@ def setReady(byWhom):
 
 ATTENTION_KINDS = ("first_contact", "war_declared", "peace_made", "city_founded", "city_changed_hands",
 	"city_razed", "combat", "tech_learned", "building_built", "project_built", "religion_founded",
-	"great_person", "golden_age", "unit_arrived", "unit_done", "deal_done", "deal_declined", "deal_failed", "native_deal", "ai_change_undone",
+	"great_person", "golden_age", "unit_arrived", "unit_done", "deal_done", "deal_declined", "deal_failed", "native_deal", "unit_disbanded",
 	"unit_waiting", "city_queue_done", "deal_ended", "budget_suspended")
 
 def noteAttention(kind):
@@ -3109,9 +3164,10 @@ def poll():
 			os.makedirs(IN_DIR)
 		if not os.path.isdir(REPLY_DIR):
 			os.makedirs(REPLY_DIR)
+		names = [n for n in os.listdir(IN_DIR) if n.endswith(".json")]
 		if gameReady():
 			try:
-				guardChoices()
+				guardChoices(bool(names))   # answers always see the state with the AI's moves undone
 			except:
 				log("choices guard FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 			try:
