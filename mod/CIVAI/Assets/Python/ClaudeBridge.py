@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 55
+BRIDGE_VERSION = 57
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -936,7 +936,15 @@ def recordEvent(tag, a):
 	elif tag == "claudeEvent":
 		me, trig, ttype, ids, text, options = engineArgs(a)
 		if me == iMe:
-			opts = [stripTags(u"%s" % x).strip() for x in (u"%s" % options).split(u"\n") if x.strip()]
+			opts = []
+			for line in (u"%s" % options).split(u"\n"):
+				line = stripTags(line).strip()
+				if not line:
+					continue
+				if re.match(u"^\\d+: ", line) or not opts:
+					opts.append(line)
+				else:
+					opts[-1] = opts[-1] + u"; " + line   # an option's effects stay with it
 			newChoice("event", trig, stripTags(u"%s" % text) or gc.getEventTriggerInfo(ttype).getType(), opts)
 	elif tag == "claudeFreeTech":
 		if engineArgs(a)[0] == iMe:
@@ -2872,9 +2880,31 @@ def proposalText(v):
 		return "%s cancels a deal with you: %s / %s" % (who, gives, wants)
 	return "%s says something (%s)" % (who, c)
 
+g_iconNames = {}
+
+def iconNames():
+	# the game's font draws icons with private characters: name them (gold, research, happiness...)
+	if not g_iconNames:
+		for i in range(CommerceTypes.NUM_COMMERCE_TYPES):
+			g_iconNames[unichr(gc.getCommerceInfo(i).getChar())] = u" " + gc.getCommerceInfo(i).getDescription().lower()
+		for i in range(YieldTypes.NUM_YIELD_TYPES):
+			g_iconNames[unichr(gc.getYieldInfo(i).getChar())] = u" " + gc.getYieldInfo(i).getDescription().lower()
+		for name, word in (("HAPPY_CHAR", u" happiness"), ("UNHAPPY_CHAR", u" unhappiness"), ("HEALTHY_CHAR", u" health"),
+				("UNHEALTHY_CHAR", u" unhealthiness"), ("BULLET_CHAR", u""), ("STRENGTH_CHAR", u" strength"),
+				("MOVES_CHAR", u" moves"), ("RELIGION_CHAR", u" religion"), ("GREAT_PEOPLE_CHAR", u" great people"),
+				("ANGRY_POP_CHAR", u" angry citizens"), ("TRADE_CHAR", u" trade"), ("DEFENSE_CHAR", u" defence")):
+			try:
+				g_iconNames[unichr(CyGame().getSymbolID(getattr(FontSymbols, name)))] = word
+			except:
+				pass
+	return g_iconNames
+
 def stripTags(t):
-	# game text carries markup such as <color=...> and [ICON_GOLD]; keep the words
-	return re.sub(u"<[^>]*>|\\[[A-Z_]+\\]", u"", t)
+	# game text carries markup such as <color=...> and [ICON_GOLD]; keep the words, name the icons
+	t = re.sub(u"<[^>]*>|\\[[A-Z_]+\\]", u"", t)
+	for ch, word in iconNames().items():
+		t = t.replace(ch, word)
+	return t
 
 def newProposal(frm, comment, data, gives, wants):
 	gives = [list(x) for x in gives]   # stored as JSON lists: compare in the same form
@@ -3008,7 +3038,7 @@ def answerChoice(o, n, v, a):
 		gc.getTeam(p.getTeam()).setHasTech(t, True, iMe, True, True)
 		done = "got %s for free" % gc.getTechInfo(t).getDescription()
 	else:
-		ids = [int(x.split(":")[0]) for x in v["options"]]
+		ids = [int(re.match(u"^(\\d+):", x).group(1)) for x in v["options"] if re.match(u"^\\d+:", x)]
 		e = int(str(a).split(":")[0].strip().lstrip("#"))
 		if e not in ids:
 			raise Exception("pick one of the options: %s" % ", ".join([str(i) for i in ids]))
@@ -3063,8 +3093,10 @@ def cmdAnswer(args):
 	return answerProposal(n, a.lower() in ("yes", "y", "accept", "ok"))
 
 def engineArgs(a):
-	if len(a) == 1 and type(a[0]) == type(()):
-		return a[0]
+	# a generic game event's arguments arrive wrapped (a tuple or list inside the event's own list)
+	a = list(a)
+	while len(a) == 1 and type(a[0]) in (type(()), type([])):
+		a = list(a[0])
 	return a
 
 def cmdOffers(args):
