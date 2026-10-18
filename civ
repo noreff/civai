@@ -2,7 +2,7 @@
 """civ - talk to the running Civ IV game through the CIVAI mod mailbox.
 
   civ ping                 is the game there, whose turn is it
-  civ status               compact digest of Claude's empire
+  civ status               compact digest of your empire
   civ map [X Y [R]]        schematic map (PNG); with X Y: zoom on a square of radius R (default 6)
   civ tile X Y             one tile: terrain, resource, owner, yields, units (foreign ones with
                            the health, strength and promotions a human sees on hover)
@@ -11,13 +11,13 @@
   civ city <name>          a city: full detail if mine, what I can see if not
   civ unit <id>            one of my units
   civ player <name|civ|id> a player I have met
-  civ move <id> X Y        walk a unit to X Y (several turns if needed); the unit becomes Claude's
+  civ move <id> X Y        walk a unit to X Y (several turns if needed); the unit becomes yours
   civ actions <unit id>    what the unit can do right now (the game's own buttons)
   civ do <unit id> <action> [X Y | unit id] [--queue]   (LEAD <unit id>: a Great General joins that unit)
                            do one: FORTIFY, SENTRY, FOUND, BUILD_FARM, BUILD_ROAD, PILLAGE,
                            PROMOTE_COMBAT1, UPGRADE_..., AUTO_BUILD, AUTO_EXPLORE, ...;
-                           MOVE_TO / ROUTE_TO take X Y; the unit stays Claude's (AUTO_ hands
-                           it to the game's automation); a finished job wakes Claude (unit_done)
+                           MOVE_TO / ROUTE_TO take X Y; the unit stays yours (AUTO_ hands
+                           it to the game's automation); a finished job wakes you (unit_done)
   civ offer <player> [--give ITEM...] [--get ITEM...]
                            propose a deal; items: tech:<name>, gold:<n>, open_borders,
                            defensive_pact, peace, war:<player>, peace_with:<player> (make peace
@@ -46,7 +46,7 @@
                            (the built-in AI can't change religion or civics for us: the
                            bridge undoes its changes, event ai_change_undone)
   civ war <player> [--check]
-                           declare war (only Claude declares wars for its civ); --check only
+                           declare war (only you declare wars for your civ); --check only
                            shows what it would do: deals that end, our units pushed out of
                            their land
   civ ratify <N>           keep deal #N that the built-in AI agreed to for us (event native_deal)
@@ -79,16 +79,16 @@
   civ hurry <city> [whip|buy]
                            the game's Hurry button: without whip/buy only shows the price
                            (population / gold / unhappiness turns) for the current item
-  civ claim <id>           take a unit from the built-in AI: it waits for Claude's orders
+  civ claim <id>           take a unit from the built-in AI: it waits for your orders
   civ release <id|all>     give unit(s) back to the built-in AI
   civ py "<code>"          DIRECTOR ONLY (needs CIV_DEV=1): run Python inside the game (sees everything, logged to exec.log);
                            an expression returns its value, statements return `result`
-  civ ready                Claude is done with this turn: the player may end it
+  civ ready                you are done with this turn: the player may end it
   civ gate [on|off]        turn gate: the player cannot end the turn until `civ ready`
-  civ gate auto on|off [N] auto-ready quiet turns; wake Claude ("claude_wake") only when
+  civ gate auto on|off [N] auto-ready quiet turns; wake you ("claude_wake") only when
                            something happened, an enemy is near, or every N turns (default 5)
   civ hold                 take "ready" back: the player must wait for the next `civ ready`
-  civ say "<text>"         chat line to the player in the game, from Claude's leader
+  civ say "<text>"         chat line to the player in the game, from you
   civ say --popup "<text>" the same as a popup window
   civ say --to <leader> "<text>"   (a game of several AI leaders) a private message only that leader
                            reads; without --to every leader who has met you reads it
@@ -96,11 +96,11 @@
   civ director "<text>"    a note to the CIVAI director (not the game): a broken or missing tool,
                            something that looks wrong; answers come in director_notes.md.
                            Without text: what was sent
-  civ think "<text>"       one line of Claude's reasoning for the video (thoughts.log)
+  civ think "<text>"       one line of your reasoning for the video (thoughts.log)
   civ events [N]           last N things that happened (default 30); works without the game
   civ raw <cmd> [json]     send any bridge command, print the JSON reply
 
-Everything is limited to what Claude's civilization knows (fog of war).
+Everything is limited to what your civilization knows (fog of war).
 CIV_PLAYER=N makes the commands act for AI civ N (several agents in one game); humans are refused.
 The game answers only while a game is loaded; commands wait up to 2 min.
 """
@@ -497,7 +497,7 @@ def main(argv):
             if not r["game_ready"]:
                 print("bridge alive (%.0f ms), no game in progress" % ms)
             else:
-                print("bridge v%s alive (%.0f ms). Turn %d, %s. Claude = player %d. Turn active: %s" % (
+                print("bridge v%s alive (%.0f ms). Turn %d, %s. You = player %d. Turn active: %s" % (
                     r.get("bridge_version", 1), ms, r["turn"], year(r["year"]), r["claude_player"],
                     r["turn_active_players"]))
         elif cmd == "status":
