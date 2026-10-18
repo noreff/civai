@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 87
+BRIDGE_VERSION = 88
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -358,6 +358,8 @@ def rewindSeat(last, now):
 		(cy, it) = p.nextCity(it, False)
 	saveCityClaims(d)
 	o = loadProposals()
+	for k in o["open"].keys():
+		closeNote(o, k, "a reload went back to the start of turn %d, before it was made" % now)
 	o["open"] = {}
 	saveProposals(o)
 	# the logs are append-only: these markers tell every reader that the later turns logged before them never happened
@@ -3322,12 +3324,22 @@ def newProposal(frm, comment, data, gives, wants):
 	writeEvent("proposal", {"id": n, "text": proposalText(v),
 		"answer": "civ answer %d yes|no (open until the end of next turn)" % n})
 
+def closeNote(o, n, why):
+	# remembered for a while, so a late answer learns what happened to it
+	c = o.setdefault("closed", {})
+	c[str(n)] = why
+	for k in sorted(c.keys(), lambda a, b: cmp(int(a), int(b)))[:-30]:
+		del c[k]
+
 def answerProposal(n, yes, why=None):
 	iMe = getClaudePlayer()
 	o = loadProposals()
 	v = o["open"].get(str(n))
 	if v is None:
-		raise Exception("no open proposal #%s (civ proposals)" % n)
+		closed = (o.get("closed") or {}).get(str(n))
+		if closed:
+			raise Exception("proposal #%s is closed: %s (civ proposals lists the open ones)" % (n, closed))
+		raise Exception("no proposal #%s (civ proposals lists the open ones)" % n)
 	ai = gc.getPlayer(v["from"])
 	gives = [tuple(x) for x in v["gives"]]
 	wants = [tuple(x) for x in v["wants"]]
@@ -3359,6 +3371,8 @@ def answerProposal(n, yes, why=None):
 			ai.handleDiploEvent(DiploEventTypes.DIPLOEVENT_DEMAND_WAR, iMe, -1, -1)
 			done.append("%s declares war" % pname(v["from"]))
 	del o["open"][str(n)]
+	closeNote(o, n, why == "no answer in time" and "nobody answered it by the end of turn %d" % v["turn"]
+		or "answered %s on turn %d" % (yes and "yes" or "no", gc.getGame().getGameTurn()))
 	saveProposals(o)
 	refreshSnapshot()
 	writeEvent("proposal_answered", {"id": int(n), "answer": yes and "yes" or "no", "what": proposalText(v),
