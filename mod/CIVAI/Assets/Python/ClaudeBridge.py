@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 143
+BRIDGE_VERSION = 144
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1764,9 +1764,38 @@ def chatShow(head, text):
 		text = text[:CHAT_CHARS].rsplit(" ", 1)[0] + u"\u2026"
 	g_chat["lines"] = (g_chat["lines"] + [(camClock(), head, text)])[-CHAT_LINES:]
 
+CAPTION_SECONDS = 8
+g_caption = {"text": None, "until": 0.0, "shown": None}
+
+def caption(text):
+	# the event's title over the shot (the game shows its own pop-up only to the civs involved, never to the
+	# filmed spectator): the studio calls it with each event it films
+	g_caption["text"], g_caption["until"] = text, camClock() + CAPTION_SECONDS
+
+def captionPanel(sc, now):
+	text = now < g_caption["until"] and g_caption["text"] or None
+	if text == g_caption["shown"]:
+		return
+	g_caption["shown"] = text
+	sc.deleteWidget("CIVAICaptionBG")
+	sc.deleteWidget("CIVAICaption")
+	if not text:
+		return
+	W = sc.getXResolution()
+	w = min(int(W * 0.6), 40 + len(text) * 15)
+	x = (W - w) / 2
+	sc.addPanel("CIVAICaptionBG", u"", u"", True, False, x, 96, w, 46, PanelStyles.PANEL_STYLE_MAIN_BLACK50)
+	sc.setLabel("CIVAICaption", "Background", u"<font=4b><color=255,220,120,255>%s</color></font>" % text, 1 << 2,
+		W / 2, 106, -0.1, FontTypes.TITLE_FONT, WidgetTypes.WIDGET_GENERAL, -1, -1)
+
 def chatPanel():
 	import CvScreenEnums
 	now = camClock()
+	try:
+		captionPanel(CyGInterfaceScreen("MainInterface", CvScreenEnums.MAIN_INTERFACE), now)
+	except:
+		g_caption["text"] = None
+		log("caption FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 	g_chat["lines"] = [l for l in g_chat["lines"] if now - l[0] < CHAT_SECONDS]
 	key = tuple([l[0] for l in g_chat["lines"]])
 	if key == g_chat["shown"]:

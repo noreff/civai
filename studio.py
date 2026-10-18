@@ -109,6 +109,24 @@ def in_stream(wall):
     return best and {"file": os.path.basename(best[0]), "second": round(wall - best[1], 1)}
 
 
+def model_names():
+    # the screen calls each leader by the model playing it: "Claude Sonnet · Asoka"
+    try:
+        return {v: k for k, v in json.load(open(os.path.join(G, "names.json"))).items() if k != v}
+    except (OSError, ValueError):
+        return {}
+
+
+def on_screen(text):
+    for leader, model in model_names().items():
+        text = re.sub(r"\b%s(?: \([^)]*\))?" % re.escape(leader), "%s \u00b7 %s" % (model, leader), text)
+    return text
+
+
+def caption(text):
+    civ("py", "import ClaudeBridge as B; B.caption(%r); result = 'ok'" % on_screen(text))
+
+
 def look_at(x, y):
     civ("py", "import ClaudeBridge as B; B.cameraHold(%d, %d); result = 'ok'" % (int(x), int(y)))
 
@@ -257,6 +275,7 @@ def main():
                     xy = where
                 if xy and kind not in ("capture",):   # the bridge's camera already flies to captures
                     look_at(*xy)
+                caption(text)
                 stem = "T%03d-%s-%s" % (t or 0, kind, re.sub(r"[^A-Za-z0-9]+", "-", text)[:60].strip("-"))
                 time.sleep(SHOT_AFTER)
                 files = {"shot": shot(stem)}
