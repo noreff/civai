@@ -17,6 +17,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUN = os.path.join(HERE, "run")
@@ -49,7 +50,14 @@ def run_civ(seat, argv):
                 "CIV_ACTOR": "agent"})
     if seat.get("readonly"):
         env["CIV_READONLY"] = "1"
+    t0 = time.time()
     r = subprocess.run([os.path.join(HERE, "civ")] + argv, capture_output=True, text=True, env=env, timeout=300)
+    # every call and how it ended, for the record (outside the seats' folders: no seat reads it)
+    err = (r.stderr.strip() or (r.stdout.strip() if r.stdout.lstrip().startswith("ERROR") else "")).splitlines()
+    row = {"wall": time.strftime("%Y-%m-%d %H:%M:%S"), "seat": seat["key"], "argv": " ".join(argv)[:300],
+           "code": r.returncode, "error": err[0][:300] if err else None, "seconds": round(time.time() - t0, 2)}
+    with open(os.path.join(HERE, "games", seat["game"], "calls.jsonl"), "a") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
     return {"out": r.stdout, "err": r.stderr, "code": r.returncode}
 
 

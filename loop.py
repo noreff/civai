@@ -774,6 +774,21 @@ def handle(cfg, d, st, events, chat, reasons):
     return error
 
 
+def until_reset(error):
+    # seconds until a subscription usage limit resets, when the error names the time ("try again at 7:03 PM",
+    # "resets 7pm"); None for any other failure
+    import re
+    m = re.search(r"(?:try again at|resets(?: at)?)\s+(\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])", error or "")
+    if not m or "limit" not in error.lower():
+        return None
+    h, mi = int(m.group(1)) % 12 + (12 if m.group(3).lower() == "pm" else 0), int(m.group(2) or 0)
+    now = time.localtime()
+    secs = (h * 3600 + mi * 60) - (now.tm_hour * 3600 + now.tm_min * 60 + now.tm_sec)
+    if secs < 0:
+        secs += 86400
+    return min(secs + 120, 6 * 3600)
+
+
 def notice(text):
     # a line on the human's screen from CIVAI itself (not from the leader), so a silent leader is explained
     civ("raw", "notice", json.dumps({"text": text}))
@@ -901,12 +916,16 @@ def main():
             print(time.strftime("%H:%M:%S"), traceback.format_exc(), flush=True)
         if error and not once:
             # the agent never got to play (usage limit, network, crash): keep these events for the next try,
-            # say so on screen once, and wait longer each time; the turn itself was already released
+            # say so on screen, and wait longer each time (or until a usage limit says it resets). A seat's
+            # civ is still not ready, so a game of several leaders waits for it: no one plays a turn short
             failures += 1
-            if failures == 1:
-                notice("the AI leader could not play this wake-up (%s). The game goes on; the leader catches up "
-                       "when the AI is reachable again." % error.splitlines()[0][:120])
-            time.sleep(min(60 * 2 ** (failures - 1), 900))
+            wait = until_reset(error)
+            if failures == 1 or wait:
+                notice("the AI leader could not play this wake-up (%s). %s" % (error.splitlines()[0][:120],
+                       "The game waits for this leader" if SEAT else "The game goes on; the leader catches up when "
+                       "the AI is reachable again") + (", until about %s." % time.strftime("%H:%M", time.localtime(
+                       time.time() + wait)) if wait else "."))
+            time.sleep(wait or min(60 * 2 ** (failures - 1), 900))
             continue
         if failures:
             notice("the AI leader is playing again.")
