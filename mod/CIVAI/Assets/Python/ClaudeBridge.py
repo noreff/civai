@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 59
+BRIDGE_VERSION = 60
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1072,7 +1072,18 @@ def aiUnitUpdate(gu, argsList):
 		pl = u.plot()
 		if d1 >= 0 and d2 >= 0 and cl.get("targeted"):
 			pl = CyMap().plot(d1, d2)
+		before = (u.getX(), u.getY(), u.getMoves())
 		g.pushMission(MissionTypes(m), d1, d2, 0, False, True, MissionAITypes.NO_MISSIONAI, pl, u)
+		if not u.isDead() and g.getLengthMissionQueue() == 0 and (u.getX(), u.getY(), u.getMoves()) == before:
+			# the game refused the order now that our turn came (the target changed, no moves left...): say so
+			cl["busy"] = False
+			cl["mission"] = None
+			saveClaims(claims)
+			writeEvent("order_failed", {"id": u.getID(), "unit": gc.getUnitInfo(u.getUnitType()).getType(),
+				"x": u.getX(), "y": u.getY(), "order": gc.getMissionInfo(m).getType(),
+				"note": "the order you gave during the other player's turn couldn't be carried out when our turn came; "
+				"the unit waits (civ actions %d)" % u.getID()})
+			g.pushMission(MissionTypes.MISSION_SKIP, -1, -1, 0, False, False, MissionAITypes.NO_MISSIONAI, u.plot(), u)
 		return 1
 	t = cl.get("target")
 	if t and (u.getX(), u.getY()) != (t[0], t[1]):
@@ -3674,7 +3685,7 @@ def setReady(byWhom):
 
 ATTENTION_KINDS = ("first_contact", "war_declared", "peace_made", "city_founded", "city_changed_hands",
 	"city_razed", "combat", "tech_learned", "building_built", "project_built", "religion_founded",
-	"great_person", "golden_age", "unit_arrived", "unit_done", "deal_done", "deal_declined", "deal_failed", "native_deal", "unit_disbanded", "proposal", "diplomacy", "treasury_empty",
+	"great_person", "golden_age", "unit_arrived", "unit_done", "deal_done", "deal_declined", "deal_failed", "native_deal", "unit_disbanded", "proposal", "diplomacy", "treasury_empty", "order_failed",
 	"unit_waiting", "city_queue_done", "deal_ended", "budget_suspended")
 
 def noteAttention(kind):

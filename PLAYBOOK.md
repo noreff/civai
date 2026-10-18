@@ -47,6 +47,7 @@ The game always waits for you: the human can't end a turn until you say `civ rea
 | `proposal` | Something waits for your answer: another leader's deal, peace offer, tribute demand or request (convert, switch civic, join a war, stop trading); the human's offer on the diplomacy screen; a UN / Apostolic Palace vote; a random event or quest; a free tech. `civ proposals` lists them; `civ answer N yes|no` (a vote: yes/no/abstain or a leader's name; an event: the option number; a free tech: its name). The game's own consequences follow. No answer by the end of next turn counts as no (an event: its first option; a free tech waits). |
 | `native_deal` | A deal you didn't make appeared (should no longer happen; if it does, it waits for your seal: `civ ratify N` / `civ reject N`, and tell the director). |
 | `unit_waiting` | A settler, great person or missionary was born. It waits for your orders (`civ actions`, `civ move`, `civ do`); `civ release <id>` hands it to the built-in AI. |
+| `order_failed` | An order you gave during the human's turn couldn't be carried out when your turn came; the unit waits for a new one. |
 | `city_queue_done` | A city finished your build list and builds nothing until you `civ build` there (`civ build <city> auto` hands its builds to the game's automation). |
 
 Rules of thumb:
