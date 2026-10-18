@@ -754,16 +754,20 @@ def running_parts(g):
     return out
 
 
+def civ_out(*args):
+    r = subprocess.run([os.path.join(HERE, "civ")] + list(args), capture_output=True, text=True, timeout=60)
+    return r.stdout + r.stderr
+
+
+LOAD_WAIT = 600   # seconds to wait for the save to be loaded by hand
+
+
 def quick_load():
-    """UNTESTED: press Ctrl+L (the game's Quick Load) in the Civ IV window through System Events.
-    Needs Accessibility permission for the terminal; CIV_WINDOW names the game's process if it differs."""
-    script = ('tell application "System Events"\n'
-              '  set civ to first process whose name contains "%s"\n'
-              '  set frontmost of civ to true\n'
-              '  delay 1\n'
-              '  key code 37 using control down\n'     # 37 = L
-              'end tell' % CIV_WINDOW)
-    subprocess.run(["osascript", "-e", script], check=True, timeout=30)
+    """Load the quick save. Under Wine the game ignores synthetic key presses (Ctrl+L through System Events was
+    tried on 2026-10-18 and did nothing), so the load is a mouse step on the game's own menu, done by whoever
+    drives the screen: Esc (or the main menu) -> Load Game -> single -> quick -> QuickSave -> OK."""
+    print(time.strftime("%H:%M:%S"), "LOAD NOW: in Civ, Load Game -> Saves/single/quick -> QuickSave -> OK "
+          "(waiting up to %d s)" % LOAD_WAIT, flush=True)
 
 
 def bridge_files(bridge):
@@ -945,8 +949,11 @@ def play(g, turn, w, save, snap, steps, rest, log_dir, pace, tell):
     truth_path = os.path.join(g.bridge, "truth.jsonl")
     log_pos, truth_pos = size(log_path), size(truth_path)
     quick_load()
+    # a load shows in the bridge's log ("dump ok: load_game turn=T" with one agent; with several, the seats'
+    # "engine control on" lines) and the game's clock is back at turn T
     wait_for("the load of turn %d" % turn, lambda: any(
-        re.search(r"dump ok: load_game turn=%d\b" % turn, l) for l in new_lines(log_path, log_pos)), 180)
+        re.search(r"dump ok: load_game turn=%d\b|engine control on for player" % turn, l)
+        for l in new_lines(log_path, log_pos)) and re.search(r"Turn %d," % turn, civ_out("ping")), LOAD_WAIT)
     if os.path.isdir(snap):
         # after the load: the load itself clears open proposals and claimed units' targets; the gate stays
         # as the load set it (every seat held)
