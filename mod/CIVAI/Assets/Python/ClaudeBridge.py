@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 98
+BRIDGE_VERSION = 99
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1132,8 +1132,10 @@ g_camera = {"at": 0.0, "prio": 0, "debug_tried": False, "turn_news": False, "nex
 def spectating():
 	if not seatsConfigured():
 		return False
-	p = gc.getPlayer(gc.getGame().getActivePlayer())
-	return not p.isAlive() and not agentPlayers().count(gc.getGame().getActivePlayer())
+	a = gc.getGame().getActivePlayer()
+	if a < 0:
+		return False   # a save is still loading
+	return not gc.getPlayer(a).isAlive() and not agentPlayers().count(a)
 
 def cameraTo(x, y, prio):
 	now = time.time()
