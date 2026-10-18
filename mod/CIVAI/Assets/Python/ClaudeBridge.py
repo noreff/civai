@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 109
+BRIDGE_VERSION = 110
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3783,7 +3783,9 @@ def cmdVictory(args):
 		elif info.isConquest():
 			r["conquest"] = "eliminate every rival"
 		elif info.isDiploVote():
-			r["diplomatic"] = "win a victory vote in the UN or the Apostolic Palace (see `civ relations` for who backs whom)"
+			r["diplomatic"] = "win a victory vote in the UN or the Apostolic Palace: %s (`civ votes` for members and " \
+				"votes; `civ relations` for who backs whom)" % "; ".join([x for vs in range(gc.getNumVoteSourceInfos())
+				for x in victoryVotes(vs)])
 		elif t.find("SPACE") >= 0:
 			r["space"] = "build and launch the spaceship (Apollo Program first)"
 		elif info.isEndScore():
@@ -4225,6 +4227,19 @@ def cmdWork(args):
 	c.alterSpecialistCount(s, n)
 	return workView(c)
 
+def victoryVotes(vs):
+	# the resolutions of a diplomatic body that win the game, and the share of its votes each needs (Victory screen)
+	g = gc.getGame()
+	out = []
+	for v in range(gc.getNumVoteInfos()):
+		vi = gc.getVoteInfo(v)
+		if vi.isVictory() and vi.isVoteSourceType(vs):
+			line = "%s: needs %d%% of the votes" % (vi.getDescription(), vi.getPopulationThreshold())
+			if g.isDiploVote(vs):
+				line += " (%d of the %d votes there are now)" % (g.getVoteRequired(v, vs), g.countPossibleVote(v, vs))
+			out.append(line)
+	return out
+
 def cmdVotes(args):
 	# the Voting screen: each diplomatic body (Apostolic Palace, United Nations), its Resident, members and votes
 	iMe, iTeam = myIds()
@@ -4233,7 +4248,8 @@ def cmdVotes(args):
 	for vs in range(gc.getNumVoteSourceInfos()):
 		name = gc.getVoteSourceInfo(vs).getDescription()
 		if not g.isDiploVote(vs):
-			out[name] = "not founded yet (its wonder hasn't been built)"
+			out[name] = "not founded yet (its wonder hasn't been built); a win here: %s" % (
+				"; ".join(victoryVotes(vs)) or "none")
 			continue
 		sec = g.getSecretaryGeneral(vs)
 		resident = [pname(i) for i in range(gc.getMAX_CIV_PLAYERS()) if gc.getPlayer(i).isAlive() and gc.getPlayer(i).getTeam() == sec]
@@ -4256,7 +4272,8 @@ def cmdVotes(args):
 			"resident": ", ".join(resident) or "none yet",
 			"members (leaders you know)": members or ["none"],
 			"next resolution in turns": g.getVoteTimer(vs),
-			"next Resident election in turns": g.getSecretaryGeneralTimer(vs)}
+			"next Resident election in turns": g.getSecretaryGeneralTimer(vs),
+			"diplomatic victory": victoryVotes(vs) or ["no resolution here wins the game"]}
 	return out
 
 def cmdBuild(args):
