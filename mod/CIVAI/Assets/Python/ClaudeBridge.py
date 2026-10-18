@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 172
+BRIDGE_VERSION = 173
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3957,7 +3957,7 @@ def dealPopup(n, fromPlayer, toPlayer, give, get):
 		p.getName(), ", ".join([itemText(x, toPlayer) for x in get]) or u"nothing"))
 	popup.addButton(u"Accept")
 	popup.addButton(u"Decline")
-	popup.setUserData((n,))
+	popup.setUserData((n, fromPlayer))
 	popup.launch(False)
 
 def dealApply(playerID, userData, popupReturn):
@@ -3965,7 +3965,17 @@ def dealApply(playerID, userData, popupReturn):
 	verb = u"!decline"
 	if popupReturn.getButtonClicked() == 0:
 		verb = u"!accept"
-	answerOffer(u"%s %d" % (verb, n), playerID)
+	# with several agents each keeps its own offers: answer in the offering seat's files (the popup itself
+	# runs outside any seat, so without this the offer was never found and stayed open)
+	prev = None
+	seat = len(userData) > 1 and seatsConfigured()
+	if seat:
+		prev = actAs(userData[1])
+	try:
+		answerOffer(u"%s %d" % (verb, n), playerID)
+	finally:
+		if seat:
+			actAs(prev)
 	return 0
 
 # ------------------------------------------------- who plays which leader: picked in the game
