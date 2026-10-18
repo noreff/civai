@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 66
+BRIDGE_VERSION = 67
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -933,7 +933,7 @@ def recordEvent(tag, a):
 			writeEvent("player_turn_begins", {"gate": readGate().get("on", False), "turn": a[0] + 1})
 			autoReadyOrWake(a[0] + 1)
 	elif tag == "BeginGameTurn" and seatsConfigured():
-		seatTurnStart(a[0])
+		seatTurnStart(a[0] + 1)   # reported before the turn counter moves on
 	elif tag == "firstContact" and iTeam in (a[0], a[1]):
 		other = a[1]
 		if other == iTeam:
