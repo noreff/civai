@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 137
+BRIDGE_VERSION = 138
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -2288,8 +2288,23 @@ def cmdDo(args):
 		g.setAutomateType(AutomateTypes(au))
 	if u.isNone():
 		return {"id": args["id"], "done": name, "unit": "gone (used up, e.g. founded a city)"}
-	return {"id": u.getID(), "done": name, "at": (u.getX(), u.getY()), "moves_left": u.movesLeft() / gc.getMOVE_DENOMINATOR(),
-		"orders_queued": g.getLengthMissionQueue()}
+	r = {"id": u.getID(), "done": name, "at": (u.getX(), u.getY()), "moves_left": u.movesLeft() / gc.getMOVE_DENOMINATOR()}
+	if g.getLengthMissionQueue():
+		r["orders_queued"] = g.getLengthMissionQueue()
+	else:
+		# an order that takes effect at once (fortify, sleep, sentry...) leaves no queue; say what the unit does now
+		r["now"] = unitActivity(u)
+	return r
+
+
+def unitActivity(u):
+	act = u.getGroup().getActivityType()
+	if act == ActivityTypes.ACTIVITY_SLEEP:
+		return u.isFortifyable() and "fortified" or "asleep"
+	return {ActivityTypes.ACTIVITY_HOLD: "holding (skips this turn)", ActivityTypes.ACTIVITY_HEAL: "healing",
+		ActivityTypes.ACTIVITY_SENTRY: "on sentry", ActivityTypes.ACTIVITY_INTERCEPT: "intercepting",
+		ActivityTypes.ACTIVITY_PATROL: "patrolling", ActivityTypes.ACTIVITY_PLUNDER: "plundering",
+		ActivityTypes.ACTIVITY_MISSION: "carrying out the order"}.get(act, "awaiting orders")
 
 
 
