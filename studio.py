@@ -141,6 +141,16 @@ def city_xy(name):
     return m and (int(m.group(1)), int(m.group(2)))
 
 
+def city_owner(name):
+    out = civ("py", "import ClaudeBridge as B\nr = None\nfor i in range(gc.getMAX_CIV_PLAYERS()):\n"
+                    "    (c, it) = gc.getPlayer(i).firstCity(False)\n"
+                    "    while c and not c.isNone():\n"
+                    "        if c.getName() == %r:\n            r = '%%s (%%s)' %% (B.realName(i), gc.getPlayer(i).getCivilizationShortDescription(0))\n"
+                    "        (c, it) = gc.getPlayer(i).nextCity(it, False)\nresult = r" % name)
+    m = re.search(r"u?'([^']+)'", out)
+    return m and m.group(1)
+
+
 def capital_xy(leader):
     # by the leader's real name: the game's own name now shows the model playing it
     out = civ("py", "import ClaudeBridge as B\nr = None\nfor i in range(gc.getMAX_CIV_PLAYERS()):\n"
@@ -168,8 +178,10 @@ def moment(e):
     """(key, kind, one line, where to look) for the events worth filming; None for the rest."""
     k = e.get("kind")
     if k == "city_changed_hands":
-        return ("cap:%s:%s" % (e.get("name"), e.get("turn")), "capture",
-                "%s takes %s from %s" % (e.get("to"), e.get("name"), e.get("from")), (e.get("x"), e.get("y")))
+        # conquest 0: no army took it (its people joined the stronger culture, or it changed hands in a deal)
+        how = "%s takes %s from %s" if e.get("conquest", 1) else "%s gains %s: it leaves %s without a fight"
+        return ("cap:%s:%s" % (e.get("name"), e.get("turn")), e.get("conquest", 1) and "capture" or "flip",
+                how % (e.get("to"), e.get("name"), e.get("from")), (e.get("x"), e.get("y")))
     if k == "city_razed":
         return ("raze:%s:%s" % (e.get("name"), e.get("turn")), "razed", "%s is razed" % e.get("name"), None)
     if k == "war_declared":
@@ -180,7 +192,10 @@ def moment(e):
         return ("peace:%s:%s:%s" % (pair[0], pair[1], e.get("turn")), "peace", "%s and %s make peace" % tuple(pair),
                 ("leader", e.get("team")))
     if k == "building_built" and e.get("building") in WONDERS:
-        return ("wonder:%s" % e.get("building"), "wonder", "%s builds %s in %s" % (e.get("owner"), nice(e.get("building")),
+        owner = e.get("owner")
+        if not owner or "unknown" in owner:
+            owner = city_owner(e.get("city")) or owner   # the seat that saw it may not have met the builder
+        return ("wonder:%s" % e.get("building"), "wonder", "%s builds %s in %s" % (owner, nice(e.get("building")),
                 e.get("city")), ("city", e.get("city")))
     if k == "project_built":
         return ("project:%s:%s:%s" % (e.get("owner"), e.get("project"), e.get("turn")), "project",
@@ -274,7 +289,7 @@ def main():
                     xy = city_xy(where[1] or "")
                 else:
                     xy = where
-                if xy and kind not in ("capture",):   # the bridge's camera already flies to captures
+                if xy and kind not in ("capture", "flip"):   # the bridge's camera already flies to captures
                     look_at(*xy)
                 caption(text)
                 stem = "T%03d-%s-%s" % (t or 0, kind, re.sub(r"[^A-Za-z0-9]+", "-", text)[:60].strip("-"))
