@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 160
+BRIDGE_VERSION = 161
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1188,6 +1188,74 @@ def cameraTo(x, y, prio):
 	g_camera["at"], g_camera["prio"], g_camera["turn_news"] = now, prio, True
 	pushIn(plot, EVENT_HOLD)
 
+# Each leader's turn as it ends: what it did (moves, builds, messages, offers) and how long it took, shown when it
+# says ready, at the place it acted most (the screen only; nothing here reaches a seat)
+RECAP_SECONDS = 6
+g_acts = {}
+g_recap = []
+
+def noteAct(kind, data):
+	i = getClaudePlayer()
+	a = g_acts.get(i)
+	if a is None or a["turn"] != gc.getGame().getGameTurn():
+		a = g_acts[i] = {"turn": gc.getGame().getGameTurn(), "t0": camClock(), "moves": [], "builds": [], "say": 0, "offer": 0}
+	if kind == "move":
+		a["moves"].append(data)
+	elif kind == "build":
+		a["builds"].append(data)
+	else:
+		a[kind] = a[kind] + 1
+
+def queueRecap(i):
+	a = g_acts.get(i) or {"turn": gc.getGame().getGameTurn(), "t0": None, "moves": [], "builds": [], "say": 0, "offer": 0}
+	if [r for r in g_recap if r[0] == i]:
+		return
+	g_recap.append((i, a, camClock()))
+
+def showRecap(now):
+	# from the cameraman: the oldest waiting recap (a stale one, over a minute old, is dropped)
+	while g_recap and now - g_recap[0][2] > 60:
+		g_recap.pop(0)
+	if not g_recap:
+		return False
+	i, a, at = g_recap.pop(0)
+	p = gc.getPlayer(i)
+	if not p.isAlive():
+		return False
+	m = gc.getMap()
+	spots = {}
+	for (x, y) in a["moves"]:
+		spots[(x, y)] = spots.get((x, y), 0) + 2
+	for (x, y, what) in a["builds"]:
+		spots[(x, y)] = spots.get((x, y), 0) + 1
+	if spots:
+		x, y = sorted(spots.items(), key=lambda kv: -kv[1])[0][0]
+		plot = m.plot(x, y)
+	else:
+		c = p.getCapitalCity()
+		if not c or c.isNone():
+			return False
+		plot = c.plot()
+	did = []
+	if a["moves"]:
+		did.append("%d unit order%s" % (len(a["moves"]), len(a["moves"]) > 1 and "s" or ""))
+	if a["builds"]:
+		did.append("builds " + a["builds"][-1][2] + (len(a["builds"]) > 1 and " (+%d)" % (len(a["builds"]) - 1) or ""))
+	if a["say"]:
+		did.append("%d message%s" % (a["say"], a["say"] > 1 and "s" or ""))
+	if a["offer"]:
+		did.append("%d offer%s" % (a["offer"], a["offer"] > 1 and "s" or ""))
+	took = a.get("t0") is not None and " in %d s" % max(1, int(at - a["t0"])) or ""
+	who = p.getName() != realName(i) and u"%s \u00b7 %s" % (p.getName(), realName(i)) or realName(i)
+	caption(u"%s ends turn %d%s: %s" % (who, a["turn"], took, did and ", ".join(did) or "no orders"))
+	cam = CyCamera()
+	cam.JustLookAtPlot(plot)
+	cam.SetZoom(0.55)
+	glide(plot, plot, 0.55, 0.53, RECAP_SECONDS)
+	shotLabel([i])
+	g_camera["until"] = now + RECAP_SECONDS
+	return True
+
 MOVE_WATCH_GAP = 8      # seconds: the camera follows at most one army move this often (an attack always)
 
 def watchMove(u, target, attack):
@@ -1238,6 +1306,11 @@ def cameraman():
 	if not spectating():
 		return
 	now = camClock()
+	# a leader's turn ending cuts in, unless an event's shot is still holding
+	if g_recap and now - g_camera["at"] >= EVENT_HOLD and now >= g_camera.get("recap_until", 0):
+		if showRecap(now):
+			g_camera["recap_until"] = now + RECAP_SECONDS
+			return
 	if cameraMoving(now):
 		return
 	if now - g_camera["at"] < EVENT_HOLD or now < g_camera.get("until", 0):
@@ -1716,6 +1789,7 @@ def cmdMove(args):
 		turns = g.claudePathTurns(x, y)   # the game's pathfinder: terrain, roads, rivers, this unit's speed
 	had = loadClaims().get(u.getID())
 	setClaim(u.getID(), [x, y])
+	noteAct("move", (x, y))
 	try:
 		watchMove(u, pl, bool(args.get("attack")))
 	except:
@@ -1990,6 +2064,7 @@ def cmdSay(args):
 	# a chat line in the game's chat log (like a human opponent), or a popup with popup=true;
 	# in a game of several agents: to everyone, or privately to one leader ("to")
 	text = args["text"]
+	noteAct("say", None)
 	if seatsConfigured():
 		to = None
 		if args.get("to"):
@@ -3681,6 +3756,10 @@ def executeDeal(a, b, giveA, giveB):
 DUAL_ITEMS = ("open_borders", "defensive_pact", "permanent_alliance", "peace")   # the game's two-way treaties
 
 def cmdOffer(args):
+	noteAct("offer", None)
+	return cmdOfferInner(args)
+
+def cmdOfferInner(args):
 	iMe, iTeam = myIds()
 	other = findPlayer(args["player"])
 	if other == iMe:
@@ -5003,6 +5082,8 @@ def cmdBuild(args):
 		c.clearOrderQueue()
 		c.pushOrder(order, i, -1, False, True, False, True)
 	claimCity(c)
+	if not args.get("check"):
+		noteAct("build", (c.getX(), c.getY(), "%s in %s" % (name, c.getName())))
 	r = {"city": c.getName(), "queue": [orderName(c.getOrderFromQueue(k)) for k in range(c.getOrderQueueLength())],
 		"turns": c.getProductionTurnsLeft()}
 	if not args.get("queue") and not args.get("first") and dropped and dropped != [name] and dropped != r["queue"]:
@@ -5223,6 +5304,7 @@ def seatTurnStart(turn):
 	g["on"] = True
 	g["ready_turn"] = -1
 	writeGate(g)
+	g_acts[iMe] = {"turn": turn, "t0": camClock(), "moves": [], "builds": [], "say": 0, "offer": 0}
 	writeEvent("claude_wake", {"turn": turn, "reasons": reasons})
 
 def setReady(byWhom):
@@ -5235,6 +5317,8 @@ def setReady(byWhom):
 		if hasattr(p, "setClaudeReady"):
 			p.setClaudeReady(True)   # the engine lets this civ's turn end
 		writeEvent("claude_ready", {"by": byWhom})
+		if spectating():
+			queueRecap(getClaudePlayer())
 		return
 	g["ready_turn"] = humanTurn()
 	g["attention"] = []
