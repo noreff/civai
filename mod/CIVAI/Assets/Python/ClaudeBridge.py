@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 107
+BRIDGE_VERSION = 109
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -2849,7 +2849,8 @@ def findPlayer(want):
 			return i
 	raise Exception("no player called %s" % want)
 
-def parseItem(text):
+def parseItem(text, owner):
+	# `owner` gives the item: a city is named among its cities (a city's number is only unique per player)
 	k = text.strip().lower()
 	if ":" in k:
 		kind, arg = k.split(":", 1)
@@ -2889,13 +2890,16 @@ def parseItem(text):
 			(c, it) = gc.getPlayer(i).firstCity(False)
 			while c and not c.isNone():
 				if c.getName().lower() == arg.strip():
+					if i != owner:
+						raise Exception("%s is not %s's city to give: it belongs to %s" % (c.getName(), pname(owner), pname(i)))
 					return (kind, c.getID())
 				(c, it) = gc.getPlayer(i).nextCity(it, False)
 		raise Exception("no city called %s" % arg)
 	raise Exception("unknown deal item %s (tech:<name>, gold:<n>, gold_per_turn:<n>, resource:<name>, city:<name>, map, open_borders, "
 		"defensive_pact, permanent_alliance, peace, war:<player>, peace_with:<player>, embargo:<player>, civic:<name>, religion:<name>)" % text)
 
-def itemText(it):
+def itemText(it, owner):
+	# `owner` is the player who gives the item: a city's number means a city only among its owner's cities
 	kind, d = it
 	if kind == "tech":
 		return gc.getTechInfo(d).getDescription()
@@ -2916,11 +2920,12 @@ def itemText(it):
 	if kind == "religion":
 		return "convert to " + gc.getReligionInfo(d).getDescription()
 	if kind == "city":
-		for i in range(gc.getMAX_CIV_PLAYERS()):
-			c = gc.getPlayer(i).getCity(d)
-			if c and not c.isNone():
-				return "the city of " + c.getName()
-		return "a city"
+		if owner is None or owner < 0:
+			return "a city"
+		c = gc.getPlayer(owner).getCity(d)
+		if c and not c.isNone():
+			return "the city of " + c.getName()
+		return "a city %s no longer holds" % pname(owner)
 	if kind == "other":
 		return "a trade item of type %d" % d
 	return kind.replace("_", " ")
@@ -2986,7 +2991,7 @@ def checkItem(giver, taker, it):
 		raise Exception("%s has only %d gold" % (pname(giver), g.getGold()))
 	if not g.canTradeItem(taker, tradeData(it), False):
 		raise Exception("%s can't give %s to %s under the game's rules (e.g. tech trading needs Alphabet; "
-			"open borders need contact and no war...)" % (pname(giver), itemText(it), pname(taker)))
+			"open borders need contact and no war...)" % (pname(giver), itemText(it, giver), pname(taker)))
 
 def doItem(giver, taker, it):
 	g, t = gc.getPlayer(giver), gc.getPlayer(taker)
@@ -3079,7 +3084,7 @@ def aiDenial(ai, me, get):
 			continue
 		den = p.getTradeDenial(me, tradeData(it))
 		if den != DenialTypes.NO_DENIAL:
-			return False, "%s refuses to give %s (%s)" % (pname(ai), itemText(it), gc.getDenialInfo(den).getDescription())
+			return False, "%s refuses to give %s (%s)" % (pname(ai), itemText(it, ai), gc.getDenialInfo(den).getDescription())
 	return True, "accepted"
 
 def aiAccepts(ai, me, give, get):
@@ -3091,7 +3096,7 @@ def aiAccepts(ai, me, give, get):
 			continue      # the game has no refusal for a peace treaty itself
 		den = p.getTradeDenial(me, tradeData(it))
 		if den != DenialTypes.NO_DENIAL:
-			return False, "%s refuses to give %s (%s)" % (pname(ai), itemText(it), gc.getDenialInfo(den).getDescription())
+			return False, "%s refuses to give %s (%s)" % (pname(ai), itemText(it, ai), gc.getDenialInfo(den).getDescription())
 	vin = sum([itemValue(ai, it) for it in give])
 	vout = sum([itemValue(ai, it, me) for it in get])
 	if vout > vin * 1.1 + 10:
@@ -3124,8 +3129,8 @@ def cmdOffer(args):
 		raise Exception("that's us")
 	if not gc.getTeam(iTeam).isHasMet(gc.getPlayer(other).getTeam()):
 		raise Exception("we haven't met %s" % args["player"])
-	give = [parseItem(x) for x in args.get("give") or []]
-	get = [parseItem(x) for x in args.get("get") or []]
+	give = [parseItem(x, iMe) for x in args.get("give") or []]
+	get = [parseItem(x, other) for x in args.get("get") or []]
 	if not give and not get:
 		raise Exception("an offer needs something to give or to get")
 	# treaties are two-way, as on the game's trade screen (adding one on either side puts it on both)
@@ -3152,18 +3157,18 @@ def cmdOffer(args):
 	if not get:
 		# a gift needs no answer
 		executeDeal(iMe, other, give, [])
-		writeEvent("deal_done", {"with": pname(other), "gave": [itemText(x) for x in give], "got": []})
+		writeEvent("deal_done", {"with": pname(other), "gave": [itemText(x, iMe) for x in give], "got": []})
 		if agent:
 			prev = actAs(other)
 			try:
-				writeEvent("gift_received", {"from": pname(iMe), "got": [itemText(x) for x in give]})
+				writeEvent("gift_received", {"from": pname(iMe), "got": [itemText(x, iMe) for x in give]})
 			finally:
 				actAs(prev)
 		if gc.getPlayer(other).isHuman():
 			CyInterface().addMessage(other, True, gc.getEVENT_MESSAGE_TIME() * 3,
 				u"<font=4><color=255,200,60,255>%s gives you: %s</color></font>" % (gc.getPlayer(iMe).getName(),
-				", ".join([itemText(x) for x in give])), "", InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
-		return {"done": True, "gave": [itemText(x) for x in give]}
+				", ".join([itemText(x, iMe) for x in give])), "", InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
+		return {"done": True, "gave": [itemText(x, iMe) for x in give]}
 	if agent:
 		# another agent decides for itself: the offer waits in its proposals (civ answer N yes|no)
 		prev = actAs(other)
@@ -3172,8 +3177,8 @@ def cmdOffer(args):
 			n = loadProposals()["next"] - 1
 		finally:
 			actAs(prev)
-		writeEvent("deal_offered", {"to": pname(other), "their_number": n, "give": [itemText(x) for x in give],
-			"get": [itemText(x) for x in get]})
+		writeEvent("deal_offered", {"to": pname(other), "their_number": n, "give": [itemText(x, iMe) for x in give],
+			"get": [itemText(x, other) for x in get]})
 		return {"offer": "sent", "waiting_for": pname(other), "note": "they answer in their own time; you hear it as an event"}
 	if not gc.getPlayer(other).isHuman():
 		if engineReady():
@@ -3187,8 +3192,8 @@ def cmdOffer(args):
 			writeEvent("deal_refused", {"with": pname(other), "why": why})
 			return {"done": False, "why": why}
 		executeDeal(iMe, other, give, get)
-		writeEvent("deal_done", {"with": pname(other), "gave": [itemText(x) for x in give], "got": [itemText(x) for x in get]})
-		return {"done": True, "gave": [itemText(x) for x in give], "got": [itemText(x) for x in get]}
+		writeEvent("deal_done", {"with": pname(other), "gave": [itemText(x, iMe) for x in give], "got": [itemText(x, other) for x in get]})
+		return {"done": True, "gave": [itemText(x, iMe) for x in give], "got": [itemText(x, other) for x in get]}
 	o = loadOffers()
 	n = o["next"]
 	o["next"] = n + 1
@@ -3196,12 +3201,12 @@ def cmdOffer(args):
 		"turn": gc.getGame().getGameTurn()}
 	saveOffers(o)
 	line = u"<font=4><color=255,200,60,255>%s offers a deal #%d - you get: %s; he gets: %s. Answer in the window (or type !accept %d / !decline %d in chat).</color></font>" % (
-		gc.getPlayer(iMe).getName(), n, ", ".join([itemText(x) for x in give]) or "nothing",
-		", ".join([itemText(x) for x in get]), n, n)
+		gc.getPlayer(iMe).getName(), n, ", ".join([itemText(x, iMe) for x in give]) or "nothing",
+		", ".join([itemText(x, other) for x in get]), n, n)
 	CyInterface().addMessage(other, True, gc.getEVENT_MESSAGE_TIME() * 4, line, "",
 		InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
-	dealPopup(n, iMe, give, get)
-	writeEvent("deal_offered", {"id": n, "to": pname(other), "give": [itemText(x) for x in give], "get": [itemText(x) for x in get]})
+	dealPopup(n, iMe, other, give, get)
+	writeEvent("deal_offered", {"id": n, "to": pname(other), "give": [itemText(x, iMe) for x in give], "get": [itemText(x, other) for x in get]})
 	return {"offer": n, "waiting_for": pname(other)}
 
 def answerOffer(text, human):
@@ -3227,12 +3232,12 @@ def answerOffer(text, human):
 		writeEvent("deal_failed", {"id": int(n), "why": why})
 		CyInterface().addImmediateMessage(u"Deal #%s can't be done: %s" % (n, why), "")
 		return
-	writeEvent("deal_done", {"id": int(n), "with": pname(human), "gave": [itemText(x) for x in give], "got": [itemText(x) for x in get]})
+	writeEvent("deal_done", {"id": int(n), "with": pname(human), "gave": [itemText(x, d["from"]) for x in give], "got": [itemText(x, d["to"]) for x in get]})
 	CyInterface().addImmediateMessage(u"Deal #%s done." % n, "")
 
 DEAL_EVENT_ID = 5918
 
-def dealPopup(n, fromPlayer, give, get):
+def dealPopup(n, fromPlayer, toPlayer, give, get):
 	# the game's own popup window with Accept / Decline buttons (the leader-screen diplomacy
 	# itself can't be opened from Python); the answer comes back through dealApply
 	import Popup as PyPopup
@@ -3243,8 +3248,8 @@ def dealPopup(n, fromPlayer, give, get):
 		popup.addDDS(gc.getLeaderHeadInfo(p.getLeaderType()).getButton(), 0, 0, 64, 64)
 	except:
 		pass
-	popup.setBodyString(u"You receive: %s\n\n%s receives: %s" % (", ".join([itemText(x) for x in give]) or u"nothing",
-		p.getName(), ", ".join([itemText(x) for x in get]) or u"nothing"))
+	popup.setBodyString(u"You receive: %s\n\n%s receives: %s" % (", ".join([itemText(x, fromPlayer) for x in give]) or u"nothing",
+		p.getName(), ", ".join([itemText(x, toPlayer) for x in get]) or u"nothing"))
 	popup.addButton(u"Accept")
 	popup.addButton(u"Decline")
 	popup.setUserData((n,))
@@ -3335,8 +3340,8 @@ def proposalText(v):
 	if v["comment"] in ("event", "free_tech"):
 		return choiceText(v)
 	who = pname(v["from"])
-	gives = ", ".join([itemText(tuple(x)) for x in v["gives"]]) or "nothing"
-	wants = ", ".join([itemText(tuple(x)) for x in v["wants"]]) or "nothing"
+	gives = ", ".join([itemText(tuple(x), v["from"]) for x in v["gives"]]) or "nothing"
+	wants = ", ".join([itemText(tuple(x), getClaudePlayer()) for x in v["wants"]]) or "nothing"
 	c = v["comment"]
 	if c == "screen_offer":
 		return "%s offers on the diplomacy screen: you get %s; they get %s" % (who, gives, wants)
@@ -3444,8 +3449,8 @@ def answerProposal(n, yes, why=None):
 		executeDeal(v["from"], iMe, gives, wants)
 		done.append("deal made")
 		# our side of it, for the ledger: we gave what they wanted, we got what they gave
-		writeEvent("deal_done", {"with": pname(v["from"]), "gave": [itemText(x) for x in wants],
-			"got": [itemText(x) for x in gives], "their_proposal": int(n)})
+		writeEvent("deal_done", {"with": pname(v["from"]), "gave": [itemText(x, iMe) for x in wants],
+			"got": [itemText(x, v["from"]) for x in gives], "their_proposal": int(n)})
 	if ai.isHuman() and why != "no answer in time":
 		CyInterface().addMessage(v["from"], True, gc.getEVENT_MESSAGE_TIME() * 3,
 			u"<font=4><color=255,200,60,255>%s %s your offer.</color></font>" % (gc.getPlayer(iMe).getName(),
@@ -3472,7 +3477,7 @@ def answerProposal(n, yes, why=None):
 		prev = actAs(v["from"])
 		try:
 			writeEvent(yes and "deal_done" or "deal_declined", {"id": int(n), "with": pname(me), "by": pname(me),
-				"gave": [itemText(tuple(x)) for x in v["gives"]], "got": [itemText(tuple(x)) for x in v["wants"]],
+				"gave": [itemText(tuple(x), v["from"]) for x in v["gives"]], "got": [itemText(tuple(x), me) for x in v["wants"]],
 				"why": why})
 		finally:
 			actAs(prev)
@@ -3668,8 +3673,8 @@ def cmdOffers(args):
 	o = loadOffers()
 	seal = loadSeal()
 	return {"waiting_for_your_seal": [sealLine(k, v) for k, v in seal["open"].items()] or ["none"],
-		"open": ["#%s to %s: give %s; get %s" % (k, pname(v["to"]), ", ".join([itemText(tuple(x)) for x in v["give"]]) or "nothing",
-		", ".join([itemText(tuple(x)) for x in v["get"]])) for k, v in o["open"].items()]}
+		"open": ["#%s to %s: give %s; get %s" % (k, pname(v["to"]), ", ".join([itemText(tuple(x), v["from"]) for x in v["give"]]) or "nothing",
+		", ".join([itemText(tuple(x), v["to"]) for x in v["get"]])) for k, v in o["open"].items()]}
 
 def cmdWar(args):
 	# Claude's own declaration of war (the built-in AI no longer declares wars for this civ)
