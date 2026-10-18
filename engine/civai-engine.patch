@@ -82,10 +82,10 @@ index c3563d7..0e9d9fc 100644
  				{
  					CvMessageControl::getInstance().sendChangeWar(GET_PLAYER(eVassal).getTeam(), true);
 diff --git a/CvGame.cpp b/CvGame.cpp
-index 63ade8d..c61c77d 100644
+index 63ade8d..7fb53ed 100644
 --- a/CvGame.cpp
 +++ b/CvGame.cpp
-@@ -1,9040 +1,9068 @@
+@@ -1,9040 +1,9088 @@
 -// game.cpp
 -
 -#include "CvGameCoreDLL.h"
@@ -18064,6 +18064,26 @@ index 63ade8d..c61c77d 100644
 +								gDLL->getInterfaceIFace()->addPopup(pInfo, eSecretaryPlayer);
 +							}
 +						}
++						else if (GET_PLAYER(eSecretaryPlayer).isClaude())
++						{
++							// CIVAI: the Resident is an agent: it picks the resolution itself (CyGame.claudeChooseElection),
++							// as a human picks in the election popup; the bridge asks it
++							CvWString szOptions;
++							for (int iK = 0; iK < (int)pData->aVoteOptions.size(); iK++)
++							{
++								if (iK > 0)
++								{
++									szOptions += L"\n";
++								}
++								szOptions += pData->aVoteOptions[iK].szText;
++							}
++							CyArgsList args;
++							args.add((int)eSecretaryPlayer);
++							args.add(pData->getID());
++							args.add((int)eVoteSource);
++							args.add(szOptions.c_str());
++							CvEventReporter::getInstance().genericEvent("claudeElection", args.makeFunctionArgs());
++						}
 +						else
 +						{
 +							setVoteChosen(GET_TEAM(eSecretaryGeneral).AI_chooseElection(*pData), pData->getID());
@@ -19601,10 +19621,10 @@ index 39c8e1b..747ee99 100644
  	void AI_promote();
  
 diff --git a/CyGame.cpp b/CyGame.cpp
-index ccda8fb..7d14987 100644
+index ccda8fb..4160f04 100644
 --- a/CyGame.cpp
 +++ b/CyGame.cpp
-@@ -1,1155 +1,1185 @@
+@@ -1,1155 +1,1205 @@
 -//
 -// Python wrapper class for CvGame 
 -// 
@@ -20767,6 +20787,7 @@ index ccda8fb..7d14987 100644
 +#include "CvGameCoreDLL.h"
 +#include "CyGame.h"
 +#include "CvGameAI.h"
++#include "CvTeamAI.h"
 +#include "CyGlobalContext.h"
 +#include "CyPlayer.h"
 +//#include "CvEnums.h"
@@ -21312,6 +21333,25 @@ index ccda8fb..7d14987 100644
 +		gDLL->QuickSave();
 +	else
 +		gDLL->SaveGame(SAVEGAME_AUTO);
++}
++
++// CIVAI: the agent Resident picks a resolution; a pick out of range (-1) takes the one the game's AI would choose
++bool CyGame::claudeChooseElection(int iVoteSelectionId, int iSelection)
++{
++	if (!m_pGame)
++		return false;
++	VoteSelectionData* pData = m_pGame->getVoteSelection(iVoteSelectionId);
++	if (pData == NULL)
++		return false;
++	if (iSelection < 0 || iSelection >= (int)pData->aVoteOptions.size())
++	{
++		TeamTypes eSecretary = m_pGame->getSecretaryGeneral(pData->eVoteSource);
++		if (eSecretary == NO_TEAM)
++			return false;
++		iSelection = GET_TEAM(eSecretary).AI_chooseElection(*pData);
++	}
++	m_pGame->setVoteChosen(iSelection, iVoteSelectionId);
++	return true;
 +}
 +
 +// CIVAI: a game of several agents plays like a simultaneous-turns multiplayer game: every civ's turn is
@@ -21946,10 +21986,10 @@ index ccda8fb..7d14987 100644
 +	}
 +}
 diff --git a/CyGame.h b/CyGame.h
-index 5982bf8..5d185a2 100644
+index 5982bf8..a8f147d 100644
 --- a/CyGame.h
 +++ b/CyGame.h
-@@ -1,278 +1,282 @@
+@@ -1,278 +1,283 @@
 -#pragma once
 -
 -#ifndef CyGame_h
@@ -22372,7 +22412,8 @@ index 5982bf8..5d185a2 100644
 +	int getAIAutoPlay() const;
 +	void setAIAutoPlay(int iNewValue);
 +	void claudeSave(bool bQuick);
-+	void claudeSetSimultaneousTurns(bool bOn);	// CIVAI: every civ plays the same turn at once (a game of several agents)
++	void claudeSetSimultaneousTurns(bool bOn);
++	bool claudeChooseElection(int iVoteSelectionId, int iSelection);	// CIVAI: the agent Resident's pick (-1: the game's own)	// CIVAI: every civ plays the same turn at once (a game of several agents)
 +	bool claudeSimultaneousTurns();	// CIVAI: save the game without the UI (quick save or an auto save)
 +
 +	bool isScoreDirty() const;
@@ -22511,10 +22552,10 @@ index 5982bf8..5d185a2 100644
 +
 +#endif	// #ifndef CyGame
 diff --git a/CyGameInterface.cpp b/CyGameInterface.cpp
-index 2849981..ea8de3d 100644
+index 2849981..2fe0740 100644
 --- a/CyGameInterface.cpp
 +++ b/CyGameInterface.cpp
-@@ -1,278 +1,282 @@
+@@ -1,278 +1,283 @@
 -#include "CvGameCoreDLL.h"
 -#include "CyGame.h"
 -#include "CvRandom.h"
@@ -23046,6 +23087,7 @@ index 2849981..ea8de3d 100644
 +		.def("saveReplay", &CyGame::saveReplay)
 +		.def("claudeSetSimultaneousTurns", &CyGame::claudeSetSimultaneousTurns, "void (bool) - CIVAI: every civ plays each turn at once")
 +		.def("claudeSimultaneousTurns", &CyGame::claudeSimultaneousTurns, "bool () - CIVAI")
++		.def("claudeChooseElection", &CyGame::claudeChooseElection, "bool (int voteSelectionId, int option) - CIVAI: the agent Resident's pick (-1: the game's own)")
 +		.def("claudeSave", &CyGame::claudeSave, "void (bool bQuick) - CIVAI: save without the UI (True: quick save, False: an auto save)")
 +		.def("addPlayer", &CyGame::addPlayer, "void (int eNewPlayer, int eLeader, int eCiv)")
 +		.def("getCultureThreshold", &CyGame::getCultureThreshold, "int getCultureThreshold(CultureLevelTypes eLevel)")
