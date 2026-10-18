@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 153
+BRIDGE_VERSION = 154
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -4669,12 +4669,23 @@ def whyCantBuild(c, order, i):
 	return "a requirement of the game isn't met (coast, river, a building it needs first, or a limit)"
 
 def findItem(want):
-	# a unit, building, project or process for a city's queue
-	for (order, count, getter, prefix) in (
-			(OrderTypes.ORDER_TRAIN, gc.getNumUnitInfos(), gc.getUnitInfo, "unit_"),
-			(OrderTypes.ORDER_CONSTRUCT, gc.getNumBuildingInfos(), gc.getBuildingInfo, "building_"),
-			(OrderTypes.ORDER_CREATE, gc.getNumProjectInfos(), gc.getProjectInfo, "project_"),
-			(OrderTypes.ORDER_MAINTAIN, gc.getNumProcessInfos(), gc.getProcessInfo, "process_")):
+	# a unit, building, project or process for a city's queue. "<name> (process)", as the build list writes
+	# it, means a process; an exact name of any kind wins over a close one ("Research" is the process, not
+	# Research Institute)
+	kinds = [(OrderTypes.ORDER_TRAIN, gc.getNumUnitInfos(), gc.getUnitInfo, "unit_"),
+		(OrderTypes.ORDER_CONSTRUCT, gc.getNumBuildingInfos(), gc.getBuildingInfo, "building_"),
+		(OrderTypes.ORDER_CREATE, gc.getNumProjectInfos(), gc.getProjectInfo, "project_"),
+		(OrderTypes.ORDER_MAINTAIN, gc.getNumProcessInfos(), gc.getProcessInfo, "process_")]
+	m = re.match(r"(?i)^(.*?)\s*\(process\)\s*$", want.strip())
+	if m:
+		want, kinds = m.group(1), kinds[3:]
+	key = want.strip().lower().replace("_", " ")
+	for (order, count, getter, prefix) in kinds:
+		for i in range(count):
+			if key in (getter(i).getDescription().lower(), getter(i).getType().lower().replace("_", " "),
+					getter(i).getType().lower()[len(prefix):].replace("_", " ")):
+				return order, i, getter(i).getDescription()
+	for (order, count, getter, prefix) in kinds:
 		i = findInfo(want, count, getter, prefix)
 		if i >= 0:
 			return order, i, getter(i).getDescription()
