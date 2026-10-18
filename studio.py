@@ -110,7 +110,7 @@ def in_stream(wall):
 
 
 def look_at(x, y):
-    civ("py", "CyCamera().JustLookAtPlot(CyMap().plot(%d, %d)); result = 'ok'" % (int(x), int(y)))
+    civ("py", "import ClaudeBridge as B; B.cameraHold(%d, %d); result = 'ok'" % (int(x), int(y)))
 
 
 def city_xy(name):

@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 127
+BRIDGE_VERSION = 129
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1178,6 +1178,103 @@ def cameraTo(x, y, prio):
 		return
 	CyCamera().JustLookAtPlot(plot)
 	g_camera["at"], g_camera["prio"], g_camera["turn_news"] = now, prio, True
+
+def cameraHold(x, y):
+	# a shot chosen from outside (the studio): the camera goes there and the cameraman leaves it a while
+	plot = gc.getMap().plot(int(x), int(y))
+	if not plot.isNone():
+		CyCamera().JustLookAtPlot(plot)
+		g_camera["at"] = time.time()
+
+SHOT_SECONDS = 9        # one shot of the cameraman
+EVENT_HOLD = 12         # an event's shot (a battle, a city taken) is held this long before the cameraman moves on
+SHOT_KINDS = ("army", "frontier", "city", "army", "frontier", "wide")
+
+def cameraman():
+	# the spectator's camera never rests: between events it cuts every few seconds to something worth seeing,
+	# an army in the field, a border where two leaders meet, a growing city, a wide view of an empire. Only the
+	# screen moves (the game's own random numbers are never used, so nothing in the game changes)
+	if not spectating():
+		return
+	now = time.time()
+	if now - g_camera["at"] < EVENT_HOLD or now < g_camera.get("until", 0):
+		return
+	import random
+	kinds = list(SHOT_KINDS)
+	k = g_camera.get("shot", 0)
+	shot = None
+	for i in range(len(kinds)):
+		kind = kinds[(k + i) % len(kinds)]
+		shot = pickShot(kind, random)
+		if shot:
+			g_camera["shot"] = k + i + 1
+			break
+	if not shot:
+		return
+	x, y, zoom, pitch = shot
+	cam = CyCamera()
+	cam.JustLookAtPlot(gc.getMap().plot(x, y))
+	cam.SetBasePitch(pitch)
+	cam.SetZoom(zoom)
+	g_camera["until"] = now + SHOT_SECONDS
+
+def pickShot(kind, random):
+	seats = [i for i in agentPlayers() if gc.getPlayer(i).isAlive()]
+	if not seats:
+		return None
+	m = gc.getMap()
+	if kind == "army":
+		stacks = {}
+		for i in seats:
+			p = gc.getPlayer(i)
+			atWar = [j for j in seats if j != i and gc.getTeam(p.getTeam()).isAtWar(gc.getPlayer(j).getTeam())]
+			(u, it) = p.firstUnit(False)
+			while u and not u.isNone():
+				if u.canAttack() and not u.plot().isCity() and u.getDomainType() == DomainTypes.DOMAIN_LAND:
+					key = (u.getX(), u.getY())
+					stacks[key] = stacks.get(key, 0) + 1 + (atWar and 2 or 0)
+				(u, it) = p.nextUnit(it, False)
+		best = [k for k, v in sorted(stacks.items(), key=lambda kv: -kv[1])[:3] if v >= 2]
+		if best:
+			x, y = random.choice(best)
+			return (x, y, 0.35, -12.0)
+		return None
+	if kind == "frontier":
+		edges = []
+		for n in range(0, m.numPlots(), 3):
+			pl = m.plotByIndex(n)
+			a = pl.getOwner()
+			if a not in seats:
+				continue
+			for dx, dy in ((1, 0), (0, 1), (1, 1), (-1, 1)):
+				q = m.plot(pl.getX() + dx, pl.getY() + dy)
+				if not q.isNone() and q.getOwner() in seats and q.getOwner() != a:
+					war = gc.getTeam(gc.getPlayer(a).getTeam()).isAtWar(gc.getPlayer(q.getOwner()).getTeam())
+					edges.append((war and 3 or 1, pl.getX(), pl.getY()))
+					break
+		if edges:
+			top = max([e[0] for e in edges])
+			w, x, y = random.choice([e for e in edges if e[0] == top])
+			return (x, y, 0.45, -8.0)
+		return None
+	if kind == "city":
+		cities = []
+		for i in seats:
+			(c, it) = gc.getPlayer(i).firstCity(False)
+			while c and not c.isNone():
+				cities.append(c)
+				(c, it) = gc.getPlayer(i).nextCity(it, False)
+		if cities:
+			c = random.choice(cities)
+			return (c.getX(), c.getY(), 0.3, -15.0)
+		return None
+	if kind == "wide":
+		i = seats[g_camera.get("wide", 0) % len(seats)]
+		g_camera["wide"] = g_camera.get("wide", 0) + 1
+		c = gc.getPlayer(i).getCapitalCity()
+		if c and not c.isNone():
+			return (c.getX(), c.getY(), 0.7, 0.0)
+	return None
 
 def spectatorView():
 	# once per loaded game, from the bridge's own update (the game refuses it inside an event): the spectator's
@@ -4913,7 +5010,8 @@ def cannotDoControlTrampoline(argsList):
 def cmdReady(args):
 	setReady("claude")
 	if seatsConfigured():
-		CyInterface().addImmediateMessage(u"%s is done with this turn." % gc.getPlayer(getClaudePlayer()).getName(), "")
+		if not spectating():   # a filmed spectator's screen keeps its message panel for the leaders' words
+			CyInterface().addImmediateMessage(u"%s is done with this turn." % gc.getPlayer(getClaudePlayer()).getName(), "")
 		return {"ready_turn": readGate()["ready_turn"]}
 	CyInterface().addImmediateMessage(u"%s has finished thinking. You may end the turn." %
 		gc.getPlayer(getClaudePlayer()).getName(), "")
@@ -5127,6 +5225,11 @@ def poll():
 				spectatorView()
 			except:
 				log("spectator view FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
+			try:
+				cameraman()
+			except:
+				g_camera["until"] = time.time() + 60   # a broken shot must not flood the log
+				log("cameraman FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 			if seatsConfigured():
 				forEachSeat(seatUpkeep, bool(names))
 			else:
