@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 88
+BRIDGE_VERSION = 89
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3371,7 +3371,7 @@ def answerProposal(n, yes, why=None):
 			ai.handleDiploEvent(DiploEventTypes.DIPLOEVENT_DEMAND_WAR, iMe, -1, -1)
 			done.append("%s declares war" % pname(v["from"]))
 	del o["open"][str(n)]
-	closeNote(o, n, why == "no answer in time" and "nobody answered it by the end of turn %d" % v["turn"]
+	closeNote(o, n, why == "no answer in time" and "nobody answered it by the end of turn %d" % (v["turn"] + 1)
 		or "answered %s on turn %d" % (yes and "yes" or "no", gc.getGame().getGameTurn()))
 	saveProposals(o)
 	refreshSnapshot()
@@ -3494,7 +3494,7 @@ def expireProposals():
 				del o["open"][k]
 				saveProposals(o)
 			continue
-		if v["turn"] < now:
+		if v["turn"] < now - 1:   # open until the end of the turn after the one it was made in (what the event says)
 			try:
 				answerProposal(k, False, "no answer in time")
 			except:
