@@ -538,7 +538,7 @@ def main(argv):
                     (" (health %s, strength %s%s%s)" % (looks.get("health"), looks.get("strength"),
                      ", " + ", ".join(looks["promotions"]) if looks.get("promotions") else "",
                      ", fortified" if looks.get("fortified") else "")) if looks else ""))
-                for k in ("withdraw_chance", "collateral"):
+                for k in ("reach", "withdraw_chance", "collateral"):
                     if row.get(k):
                         print("      %s: %s" % (k.replace("_", " "), row[k]))
             if not r["attacks"]:

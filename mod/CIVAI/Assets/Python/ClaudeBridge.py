@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 115
+BRIDGE_VERSION = 116
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -690,6 +690,11 @@ def cmdOdds(args):
 		row = {"unit": "#%d %s" % (u.getID(), gc.getUnitInfo(u.getUnitType()).getDescription()),
 			"from": "%d,%d" % (u.getX(), u.getY()),
 			"my_health": "%d%%" % (100 * (u.maxHitPoints() - u.getDamage()) / max(1, u.maxHitPoints()))}
+		dist = plotDistance(u.getX(), u.getY(), x, y)
+		if dist > 1:
+			# the game shows odds only for an attack on a tile next to the unit
+			row["reach"] = ("%d tiles away: no attack from where it stands. It must first walk next to the target; these "
+				"odds are for the fight once there, and enemy units on the way (some not seen now) are fought first") % dist
 		if dfd is None or dfd.isNone():
 			row["defender"] = "none we can fight there"
 		else:
@@ -1474,6 +1479,8 @@ def cmdMove(args):
 		raise Exception("unit #%d can't go to %d,%d: %s" % (u.getID(), x, y, whyNoMove(u, pl, turns)))
 	r = {"id": u.getID(), "from": before, "now_at": (u.getX(), u.getY()), "target": (x, y),
 		"moves_left": u.movesLeft(), "missions_queued": g.getLengthMissionQueue()}
+	if args.get("attack") and plotDistance(before[0], before[1], x, y) > 1:
+		r["attack_note"] = "the target was not next to the unit: it walks first, and fights any enemy it runs into on the way"
 	if turns >= 0:
 		r["arrives"] = "in %d of our turns by the game's pathfinder (a group moves at its slowest unit's pace)" % turns
 	if not gc.getPlayer(u.getOwner()).isTurnActive():
