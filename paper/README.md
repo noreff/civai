@@ -1,6 +1,6 @@
 # CIVAI paper folder
 
-Draft 0.1, 2026-10-17. Nothing here is committed; nothing outside this folder was changed.
+Draft 0.1, 2026-10-17. `metrics.py <game>` prints the per-seat numbers of a game of several leaders (and writes `games/<id>/metrics.json`).
 
 ## What's here
 
@@ -29,19 +29,19 @@ How the pilot numbers were produced (all read-only, run from the game folder): w
 ## Measurements the experiment must produce (engineering checklist)
 
 Per wake, written by the loop (`wake_stats.jsonl` or `timeline.jsonl`):
-- [ ] seat, wake number, turn, reasons, wall start/end, seconds
+- [x] seat, wake number, turn, reasons, wall start/end, seconds
 - [ ] harness name and version; model id as reported by the provider on that call; OpenRouter snapshot id
-- [ ] usage: input/cache/output/thinking tokens; cost where reported, else usage for list-price estimate
-- [ ] model turns per wake; tool errors (commands the bridge rejected); lookups; re-queries of what the brief held
-- [ ] self-check ran / result / commands it ran / cost
-- [ ] forced `ready`, timeouts, failures
+- [x] usage: input/cache/output/thinking tokens; cost where reported, else usage for list-price estimate
+- [ ] model turns per wake; tool errors (commands the bridge rejected) — done: `games/<id>/calls.jsonl` from the broker; lookups; re-queries of what the brief held
+- [x] self-check ran / result / commands it ran / cost
+- [x] forced `ready`, timeouts, failures
 - [ ] full prompt and full output saved to disk per wake
 - [ ] reasoning trace text saved per wake where the provider returns one
 - [ ] memory snapshot commit hash; memory size in tokens
 - [ ] bridge version, engine hash, playbook hash, loop hash (constant within a game; assert it)
 
 Per message / thought:
-- [ ] `said.jsonl`: id, turn, wall, from, to, text, thought_id — `turn` and `to` are missing today
+- [x] `said.jsonl`: turn, wall, to, read_by, text, thought_id (the director's `chat_all.jsonl` has every line with from/to)
 - [ ] `thoughts.jsonl`: id, turn, wall, text — `turn` missing today
 - [ ] addressed agent-to-agent delivery confirmed: delivery event with the receiver's wake number
 
@@ -51,11 +51,11 @@ Per deal / proposal:
 - [ ] gifts (`civ give`) as deals with one empty side
 
 Per turn, by the director (not visible to agents):
-- [ ] world dump: scores, cities, units by type and position per civ, relations and attitudes among all five, ongoing deals, techs
+- [ ] world dump: scores, cities, units by type and position per civ, relations and attitudes among all five, ongoing deals, techs — partly: `truth.jsonl` per turn has score, cities, pop, techs, units, military, gold, met, wars, era per civ
 - [ ] autosave every 10 turns and at city change / war / vote
 
 Per game:
-- [ ] `manifest.json`: everything in `draft.md` §9
+- [ ] `manifest.json`: everything in `draft.md` §9 — partly: seats, file hashes and game settings, one entry per start
 - [ ] `reload` rows (expected none); `director_action` rows with reasons
 - [ ] `rec` recordings: spectator window, three per-seat terminal streams, wall clock in frame, `rec mark` notes
 
