@@ -111,6 +111,31 @@ AUTOSAVES = os.path.expanduser("~/Library/Application Support/CrossOver/Bottles/
                                "My Games/Beyond the Sword/Saves/single/auto" % os.environ.get("CIV_BOTTLE", "civ4"))
 
 
+def save_turns():
+    # game year -> turn, from the director's per-turn record (an autosave is named by its year)
+    out = {}
+    path = os.path.join(os.path.dirname(AUTOSAVES.split("/drive_c/")[0] + "/drive_c/"), "claude_bridge", "truth.jsonl")
+    if os.path.exists(path):
+        for line in open(path):
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if "year" in r:
+                out[r["year"]] = r["turn"]
+    return out
+
+
+def turn_name(name, years):
+    # AutoSave_BC-0560.CivBeyondSwordSave -> T061_AutoSave_BC-0560... when the turn is known
+    import re
+    m = re.match(r"AutoSave_(BC|AD)-(\d+)\.", name)
+    if not m:
+        return name
+    year = int(m.group(2)) * (-1 if m.group(1) == "BC" else 1)
+    return "T%03d_%s" % (years[year], name) if year in years else name
+
+
 def keep_saves(game):
     # the game keeps only its last few autosaves: copy each one into the game's folder as it appears,
     # so every turn can be loaded again later (replays, re-recording the map for the video)
@@ -120,8 +145,9 @@ def keep_saves(game):
     os.makedirs(dest, exist_ok=True)
     while True:
         try:
+            years = save_turns()
             for name in os.listdir(AUTOSAVES):
-                src, dst = os.path.join(AUTOSAVES, name), os.path.join(dest, name)
+                src, dst = os.path.join(AUTOSAVES, name), os.path.join(dest, turn_name(name, years))
                 if name.endswith(".CivBeyondSwordSave") and time.time() - os.path.getmtime(src) > 5 and (
                         not os.path.exists(dst) or os.path.getmtime(src) > os.path.getmtime(dst)):
                     shutil.copy2(src, dst)

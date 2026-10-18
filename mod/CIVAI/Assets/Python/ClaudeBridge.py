@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 76
+BRIDGE_VERSION = 77
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1085,7 +1085,8 @@ def writeTruth(turn):
 			"techs": len([k for k in range(gc.getNumTechInfos()) if t.isHasTech(k)]), "era": gc.getEraInfo(p.getCurrentEra()).getType(),
 			"religion": p.getStateReligion(), "war": [j for j in range(gc.getMAX_CIV_TEAMS()) if j != p.getTeam() and t.isAtWar(j)],
 			"met": [j for j in range(gc.getMAX_CIV_TEAMS()) if j != p.getTeam() and t.isHasMet(j)]})
-	appendLine(OUT_DIR + "\\truth.jsonl", {"turn": turn, "time": time.strftime("%Y-%m-%d %H:%M:%S"), "civs": rows})
+	appendLine(OUT_DIR + "\\truth.jsonl", {"turn": turn, "year": gc.getGame().getTurnYear(turn),
+		"time": time.strftime("%Y-%m-%d %H:%M:%S"), "civs": rows})
 
 # The director's camera (the screen is for the recording only; no agent reads it). In a game of AI seats
 # watched by a defeated spectator: the whole map once (debug view, needs the game's cheat code), then the
