@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<!-- CIVAI: the spectator's screen is filmed. Its own civ is out of the game from the start, so the game's
+     "You have been defeated!!!" banner and the "Waiting for other Civilizations..." line would sit on every
+     frame. A mod's text overrides the game's by tag: both become a blank. -->
+<Civ4GameText xmlns="http://www.firaxis.com">
+	<TEXT>
+		<Tag>TXT_KEY_MISC_DEFEAT</Tag>
+		<English> </English>
+		<French> </French>
+		<German> </German>
+		<Italian> </Italian>
+		<Spanish> </Spanish>
+	</TEXT>
+	<TEXT>
+		<Tag>SYSTEM_WAITING</Tag>
+		<English> </English>
+		<French> </French>
+		<German> </German>
+		<Italian> </Italian>
+		<Spanish> </Spanish>
+	</TEXT>
+</Civ4GameText>
