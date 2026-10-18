@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 141
+BRIDGE_VERSION = 142
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1779,11 +1779,11 @@ def chatPanel():
 		return
 	W, H = sc.getXResolution(), sc.getYResolution()
 	w = int(W * 0.34)
-	per = w / 10   # characters per line at the chat's font, about
+	per = w / 13   # characters per line at the chat's font, about (a low guess: a scroll bar is worse than space)
 	rows = 0
 	for t, head, text in g_chat["lines"]:
 		rows = rows + 1 + (len(re.sub("<[^>]*>", "", head)) + len(text) + 3) / per
-	h = min(int(H * 0.6), rows * 26 + 24)
+	h = min(int(H * 0.6), rows * 27 + 28)
 	x, y = 12, int(H * 0.86) - h
 	body = u"\n".join([u"<font=4>%s:  <color=255,235,180,255>%s</color></font>" % (head, text)
 		for t, head, text in g_chat["lines"]])
@@ -1794,7 +1794,9 @@ def colored(i, text):
 	# a leader's name in his civ's colour, as the game's own score list shows it
 	try:
 		c = gc.getColorInfo(gc.getPlayerColorInfo(gc.getPlayer(i).getPlayerColor()).getColorTypePrimary()).getColor()
-		return u"<color=%d,%d,%d,255>%s</color>" % (int(c.r * 255), int(c.g * 255), int(c.b * 255), text)
+		# lifted toward white: a dark civ colour (navy, purple) must still read on the dark chat panel
+		lift = lambda v: int((v + (1.0 - v) * 0.4) * 255)
+		return u"<color=%d,%d,%d,255>%s</color>" % (lift(c.r), lift(c.g), lift(c.b), text)
 	except:
 		return text
 
