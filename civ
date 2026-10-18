@@ -710,6 +710,8 @@ def main(argv):
             print("unknown command: %s\n\n%s" % (cmd, __doc__.strip()), file=sys.stderr)
             return 2
     except (IndexError, ValueError) as e:
+        if sys.exc_info()[2].tb_next is not None:
+            raise   # a bug deeper in the tools, not the command line: let it show as one
         # arguments that don't fit the command: say how it is written, not a Python traceback
         print("ERROR: civ %s: the arguments don't fit (%s). It is written:\n%s" % (" ".join(argv), e, usage(cmd)),
               file=sys.stderr)

@@ -89,7 +89,8 @@ def render(state, out_png, region=None):
     d.rectangle([MARGIN, MARGIN, MARGIN + W * TILE - 1, MARGIN + H * TILE - 1], fill=UNKNOWN)
 
     owner_at = {}
-    for x, y, ptype, terrain, feature, bonus, owner, impr, route, river, vis in state["plots"]:
+    for row in state["plots"]:
+        x, y, ptype, terrain, feature, bonus, owner, impr, route, river, vis = row[:11]   # later fields: not drawn
         X, Y = px(x, y)
         if ptype == PEAK:
             base = TERRAIN["TERRAIN_PEAK"]

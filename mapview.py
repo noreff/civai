@@ -81,7 +81,7 @@ def owner_name(o, short=False):
     if o is None or o < 0:
         return "no one"
     if o == ME:
-        return "us" if short else "ours (Mongol)"
+        return "us" if short else "our"
     p = PLAYERS.get(o)
     if not p:
         return "?"
