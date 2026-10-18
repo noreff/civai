@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 169
+BRIDGE_VERSION = 170
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -143,8 +143,23 @@ g_seatBase = {}
 def seatsConfigured():
 	return bool(configValue("players"))
 
+def modelPlayers():
+	# the Custom Game's choice: a slot whose difficulty is one of the mod's model levels (HANDICAP_MODEL_OPUS...)
+	# is played by that model; the human and the slots on the usual levels are not agents
+	out = []
+	for i in range(gc.getMAX_CIV_PLAYERS()):
+		p = gc.getPlayer(i)
+		if not p.isEverAlive() or p.isHuman():
+			continue
+		t = p.getHandicapType()
+		if t >= 0 and gc.getHandicapInfo(t).getType().startswith("HANDICAP_MODEL_"):
+			out.append(i)
+	return out
+
 def agentPlayers():
 	v = configValue("players")
+	if v and v.strip() == "auto":
+		return modelPlayers()
 	if v:
 		return [int(x) for x in v.split(",") if x.strip()]
 	p = getClaudePlayer()
