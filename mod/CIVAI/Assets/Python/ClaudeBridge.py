@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 106
+BRIDGE_VERSION = 107
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -807,6 +807,7 @@ def cmdCity(args):
 		"can_train": [gc.getUnitInfo(i).getType() for i in range(gc.getNumUnitInfos()) if c.canTrain(i, False, False)],
 		"can_build": [gc.getBuildingInfo(i).getType() for i in range(gc.getNumBuildingInfos())
 			if c.canConstruct(i, False, False, False)],
+		"can_create_projects": [gc.getProjectInfo(i).getDescription() for i in range(gc.getNumProjectInfos()) if c.canCreate(i, False, False)],
 		"garrison": [unitBrief(pl.getUnit(i), iTeam) for i in range(pl.getNumUnits())],
 	})
 	tiles = []
@@ -3903,6 +3904,14 @@ def cmdRules(args):
 		return {"building": info.getDescription(), "cost": me.getBuildingProductionNeeded(i),
 			"needs_tech": techList([info.getPrereqAndTech()]), "obsolete_with": techList([info.getObsoleteTech()]),
 			"happiness": info.getHappiness(), "health": info.getHealth(), "strategy": info.getStrategy(), "help": info.getHelp()}
+	i = findInfo(want, gc.getNumProjectInfos(), gc.getProjectInfo, "project_")
+	if i >= 0:
+		info = gc.getProjectInfo(i)
+		return {"project": info.getDescription(), "cost": me.getProjectProductionNeeded(i),
+			"needs_tech": techList([info.getTechPrereq()]),
+			"needs_project_first": info.getAnyoneProjectPrereq() >= 0 and gc.getProjectInfo(info.getAnyoneProjectPrereq()).getDescription() or "-",
+			"limit_per_world": info.getMaxGlobalInstances(), "limit_per_team": info.getMaxTeamInstances(),
+			"spaceship_part": info.isSpaceship(), "help": info.getHelp()}
 	i = findInfo(want, gc.getNumCivicInfos(), gc.getCivicInfo, "civic_")
 	if i >= 0:
 		info = gc.getCivicInfo(i)
@@ -3931,7 +3940,7 @@ def cmdRules(args):
 	for name, typ, text in concepts:
 		if w in (name.lower().replace(" ", "_"), typ.lower(), typ.lower().replace("concept_", "")):
 			return {"concept": name, "article": pediaText(text)}
-	raise Exception("nothing called %s among techs, units, buildings, civics, worker builds, resources, "
+	raise Exception("nothing called %s among techs, units, buildings, projects, civics, worker builds, resources, "
 		"concepts (civ rules concepts lists them)" % want)
 
 def conceptList():
@@ -4106,7 +4115,9 @@ def ownVersion(player, unit):
 def buildableNow(c):
 	units = [gc.getUnitInfo(i).getDescription() for i in range(gc.getNumUnitInfos()) if c.canTrain(i, False, False)]
 	builds = [gc.getBuildingInfo(i).getDescription() for i in range(gc.getNumBuildingInfos()) if c.canConstruct(i, False, False, False)]
-	return units + builds
+	projects = ["%s (project)" % gc.getProjectInfo(i).getDescription() for i in range(gc.getNumProjectInfos()) if c.canCreate(i, False, False)]
+	processes = ["%s (process)" % gc.getProcessInfo(i).getDescription() for i in range(gc.getNumProcessInfos()) if c.canMaintain(i, False)]
+	return units + builds + projects + processes
 
 def whyCantBuild(c, order, i):
 	# the game's reason, as the city screen would show it
