@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 112
+BRIDGE_VERSION = 113
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -2896,7 +2896,7 @@ def parseItem(text, owner):
 				(c, it) = gc.getPlayer(i).nextCity(it, False)
 		raise Exception("no city called %s" % arg)
 	raise Exception("unknown deal item %s (tech:<name>, gold:<n>, gold_per_turn:<n>, resource:<name>, city:<name>, map, open_borders, "
-		"defensive_pact, permanent_alliance, peace, war:<player>, peace_with:<player>, embargo:<player>, civic:<name>, religion:<name>)" % text)
+		"defensive_pact, permanent_alliance, peace, war:<player>, peace_with:<player>, embargo:<player>, civic:<name>, religion:<name>, vassal, surrender)" % text)
 
 def itemText(it, owner):
 	# `owner` is the player who gives the item: a city's number means a city only among its owner's cities
@@ -3148,7 +3148,8 @@ def cmdOffer(args):
 	for it in get:
 		checkItem(other, iMe, it)
 	atWar = gc.getTeam(iTeam).isAtWar(gc.getPlayer(other).getTeam())
-	if atWar and engineReady() and "peace" not in [x[0] for x in give + get]:
+	kinds = [x[0] for x in give + get]
+	if atWar and engineReady() and "peace" not in kinds and "surrender" not in kinds:
 		raise Exception("we are at war with %s: any deal with them ends the war by the game's rule. Put peace in the "
 			"deal (--give peace --get peace ...) if you want that" % pname(other))
 	agent = isAgent(other)
@@ -3158,8 +3159,8 @@ def cmdOffer(args):
 			why += ". At war, a leader refuses to talk for a while after the war begins; war success shortens it"
 		writeEvent("deal_refused", {"with": pname(other), "why": why})
 		return {"done": False, "why": why}
-	if not get:
-		# a gift needs no answer
+	if not get and "vassal" not in kinds and "surrender" not in kinds:
+		# a gift needs no answer (becoming someone's vassal does: the master must accept it)
 		executeDeal(iMe, other, give, [])
 		writeEvent("deal_done", {"with": pname(other), "gave": [itemText(x, iMe) for x in give], "got": []})
 		if agent:
@@ -3188,7 +3189,7 @@ def cmdOffer(args):
 		if engineReady():
 			# the AI's own answer (CvPlayerAI::AI_considerOffer), as on the diplomacy screen
 			ok, why = aiDenial(other, iMe, get)
-			if ok and get and not gc.getPlayer(other).AI_considerOfferText(iMe, engineText(give), engineText(get)):
+			if ok and (get or give) and not gc.getPlayer(other).AI_considerOfferText(iMe, engineText(give), engineText(get)):
 				ok, why = False, "%s turns it down (not worth it to them)" % pname(other)
 		else:
 			ok, why = aiAccepts(other, iMe, give, get)
@@ -3825,6 +3826,10 @@ def cmdTradeable(args):
 				out.append(k)
 		if gc.getTeam(pa.getTeam()).isAtWar(gc.getPlayer(b).getTeam()):
 			out.append("peace")
+		for k, what in (("vassal", "vassal (become their vassal, in peace)"),
+				("surrender", "surrender (capitulate: become their vassal, ends the war)")):
+			if pa.canTradeItem(b, tradeData((k, -1)), False):
+				out.append(what)
 		for k in ("war", "peace_with"):
 			for c in range(gc.getMAX_CIV_PLAYERS()):
 				if c in (a, b) or not gc.getPlayer(c).isAlive():
@@ -3835,7 +3840,7 @@ def cmdTradeable(args):
 				except:
 					continue
 				txt = "%s:%s" % (k, gc.getPlayer(c).getName())
-				if a != iMe and not pa.isHuman():   # our own side is our decision, not the AI's
+				if a != iMe and not pa.isHuman() and not isAgent(a):   # our side and an agent's are their own decision
 					den = pa.getTradeDenial(b, tradeData((k, c)))
 					if den != DenialTypes.NO_DENIAL:
 						txt += " (refuses: %s)" % gc.getDenialInfo(den).getDescription()

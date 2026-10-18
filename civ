@@ -23,7 +23,8 @@
   civ offer <player> [--give ITEM...] [--get ITEM...]
                            propose a deal; items: tech:<name>, gold:<n>, open_borders,
                            defensive_pact, peace, war:<player>, peace_with:<player> (make peace
-                           with a third leader). An AI answers at once (game's refusal rules
+                           with a third leader), vassal (become their vassal), surrender
+                           (capitulate in a war). An AI answers at once (game's refusal rules
                            + value); the human sees it on screen and types
                            !accept N / !decline N in chat (deal_done / deal_declined events)
   civ give <player> ITEM...  a gift (no answer needed), e.g. civ give India tech:Alphabet
