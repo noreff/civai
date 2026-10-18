@@ -75,7 +75,7 @@ def sandbox_profile():
             os.path.join(HERE, "paper"), os.path.join(HERE, "out"), os.path.join(HERE, "docs"),
             os.path.join(home, ".claude", "projects"), os.path.join(home, ".codex"),
             os.path.join(home, ".pi", "agent", "sessions"), os.path.join(home, "research"),
-            "/private/tmp/claude-501", "/tmp/claude-501"]
+            "/private/tmp/claude-501/-Users-volod"]   # the director's own sessions; a seat's Claude keeps its temp dir
     allow = [own, claude_own, CODEX_HOME]
     q = lambda p: '(subpath "%s")' % os.path.realpath(p).replace('"', '\\"')
     text = "(version 1)\n(allow default)\n(deny file-read* file-write* %s)\n(allow file-read* file-write* %s)\n" % (
@@ -792,16 +792,22 @@ def main():
     st = load_state(d)
     print("CIVAI loop on game %s (agent: %s)" % (gid, cfg["agent"][0]), flush=True)
     failures = 0
+    resume = bool(SEAT)
     while True:
         events, epos = read_from(EVENTS, st["events_pos"])
         reasons = reasons_of(events)
+        if resume and not reasons:
+            # a seat's loop (re)started while its civ waits on this turn: the game won't move until it plays
+            resume = False
+            if not raw("gate").get("ready", True):
+                reasons = ["turn %d: turn (the loop restarted while the turn waits for you)" % game_turn()]
         if not reasons and not (once or dry):
             time.sleep(1)
             continue
         if reasons:
             time.sleep(GATHER_SECONDS)              # let the burst finish
             events, epos = read_from(EVENTS, st["events_pos"])
-            reasons = reasons_of(events)
+            reasons = reasons_of(events) or reasons
         chat, cpos = read_from(CHAT, st["chat_pos"])
         if dry:
             if "--v2" in sys.argv:
