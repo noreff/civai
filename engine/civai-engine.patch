@@ -30,7 +30,7 @@ index 92adcc9..73b198d 100644
  					int iGameSpeedPercent = GC.getGameSpeedInfo(GC.getGameINLINE().getGameSpeedType()).getTrainPercent();
  					if (100 * getUnitProductionTime(eUnit) > GC.getDefineINT("UNIT_PRODUCTION_DECAY_TIME") * iGameSpeedPercent)
 diff --git a/CvCityAI.cpp b/CvCityAI.cpp
-index ce2d108..83929dc 100644
+index ce2d108..60c41e8 100644
 --- a/CvCityAI.cpp
 +++ b/CvCityAI.cpp
 @@ -156,7 +156,9 @@ void CvCityAI::AI_doTurn()
@@ -65,6 +65,44 @@ index ce2d108..83929dc 100644
  	    {
  	        AI_doHurry();	        
  	    }
+@@ -200,6 +202,10 @@ void CvCityAI::AI_assignWorkingPlots()
+ 
+ 	CvPlot* pHomePlot;
+ 	int iI;
++	// CIVAI: Claude's citizens are placed like a human's: its own tile choices stay, the governor re-places
++	// them only when it is switched on (else every recount threw Claude's choices away, captured cities
++	// ended up all specialists)
++	bool bHumanLike = isHuman() || GET_PLAYER(getOwnerINLINE()).isClaude();
+ 	
+ 	if (0 != GC.getDefineINT("AI_SHOULDNT_MANAGE_PLOT_ASSIGNMENT"))
+ 	{
+@@ -207,7 +213,7 @@ void CvCityAI::AI_assignWorkingPlots()
+ 	}
+ 
+ 	// remove all assigned plots if we automated
+-	if (!isHuman() || isCitizensAutomated())
++	if (!bHumanLike || isCitizensAutomated())
+ 	{
+ 		for (iI = 0; iI < NUM_CITY_PLOTS; iI++)
+ 		{
+@@ -235,7 +241,7 @@ void CvCityAI::AI_assignWorkingPlots()
+ 			iTotalForcedSpecialists += iForcedSpecialistCount;
+ 		}
+ 		
+-		if (!isHuman() || isCitizensAutomated() || (getSpecialistCount((SpecialistTypes)iI) < iForcedSpecialistCount))
++		if (!bHumanLike || isCitizensAutomated() || (getSpecialistCount((SpecialistTypes)iI) < iForcedSpecialistCount))
+ 		{
+ 			setSpecialistCount(((SpecialistTypes)iI), iForcedSpecialistCount);
+ 		}
+@@ -332,7 +338,7 @@ void CvCityAI::AI_assignWorkingPlots()
+ 	}
+ 	
+ 	// if automated, look for better choices than the current ones
+-	if (!isHuman() || isCitizensAutomated())
++	if (!bHumanLike || isCitizensAutomated())
+ 	{
+ 		AI_juggleCitizens();
+ 	}
 diff --git a/CvDLLButtonPopup.cpp b/CvDLLButtonPopup.cpp
 index c3563d7..0e9d9fc 100644
 --- a/CvDLLButtonPopup.cpp
