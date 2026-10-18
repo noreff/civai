@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 81
+BRIDGE_VERSION = 82
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -375,8 +375,8 @@ def rewindSeat(last, now):
 def dump(reason):
 	if reason == "load_game":
 		# a loaded save is a new starting point: nothing in it is a deal made since the last look
-		g_snap[0] = None
-		g_window[0] = None
+		g_snap.d.clear()   # every seat's
+		g_window.d.clear()
 		try:
 			rewindCheck()
 		except:
@@ -2299,10 +2299,20 @@ def cmdRaze(args):
 # game; a traded tech leaves a "traded tech to us" memory on the receiving side; gold
 # between turns only moves by deals. Research or a goody hut never counts as a deal.
 
-g_snap = [None]
+class PerSeat:
+	# a value each agent seat has its own copy of (read and written as x[0], for the acting seat)
+	def __init__(self, default):
+		self.d = {}
+		self.default = default
+	def __getitem__(self, i):
+		return self.d.get(g_acting[0], self.default)
+	def __setitem__(self, i, v):
+		self.d[g_acting[0]] = v
+
+g_snap = PerSeat(None)   # this seat's deals and holdings at the last checkpoint
 g_snapTick = [0]
 g_turnOf = [None]   # whose turn is running (set at BeginPlayerTurn)
-g_window = [None]   # (kind, player) since the last checkpoint: own, pre, diplo, human
+g_window = PerSeat(None)   # (kind, player) since this seat's last checkpoint: own, pre, diplo, human
 SEAL_FILE = OUT_DIR + "\\seal.json"
 
 def takeSnapshot():
@@ -3727,16 +3737,21 @@ def pediaText(t):
 
 def aiDoDiplo(gu, argsList):
 	if argsList[0] == getClaudePlayer():
-		return True
+		return True   # an agent's diplomacy is its own
 	try:
-		checkpoint(("diplo", argsList[0]))   # what follows is this leader's diplomacy
+		# what follows is this leader's diplomacy: every agent seat starts a new window for its own deals
+		if seatsConfigured():
+			forEachSeat(checkpoint, ("diplo", argsList[0]))
+		else:
+			checkpoint(("diplo", argsList[0]))
 	except:
 		log("deal checkpoint FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 	return gu._claudeOrigDoDiplo(argsList)
 
 def aiDoWar(gu, argsList):
-	if argsList[0] == gc.getPlayer(getClaudePlayer()).getTeam():
-		return True
+	iMe = getClaudePlayer()
+	if iMe >= 0 and argsList[0] == gc.getPlayer(iMe).getTeam():
+		return True   # wars are the agent's own decision
 	return gu._claudeOrigDoWar(argsList)
 
 def doDiploTrampoline(argsList):
