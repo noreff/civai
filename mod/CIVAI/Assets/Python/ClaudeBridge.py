@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 73
+BRIDGE_VERSION = 74
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3946,6 +3946,15 @@ def humanTurn():
 		if gc.getPlayer(i).isTurnActive():
 			return t
 	return t + 1
+
+def seatsOnLoad():
+	# a loaded save does not remember which agents were done: hold every agent's civ and wake it for this turn,
+	# or the game would play the turn without them
+	try:
+		if seatsConfigured():
+			forEachSeat(seatTurnStart, gc.getGame().getGameTurn())
+	except:
+		log("seats on load FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 
 def seatTurnStart(turn):
 	# a game of several agents: every agent plays every turn; the engine holds its civ's turn until it is ready

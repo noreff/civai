@@ -98,6 +98,7 @@ class ClaudeEventManager(CvEventManager.CvEventManager):
 	def onLoadGame(self, argsList):
 		result = CvEventManager.CvEventManager.onLoadGame(self, argsList)
 		B.safeDump("load_game")
+		B.seatsOnLoad()
 		return result
 
 	def onBeginPlayerTurn(self, argsList):
