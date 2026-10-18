@@ -27,44 +27,4 @@
 		<Italian> </Italian>
 		<Spanish> </Spanish>
 	</TEXT>
-	<TEXT>
-		<Tag>TXT_KEY_HANDICAP_MODEL_OPUS</Tag>
-		<English>Claude Opus</English>
-		<French>Claude Opus</French>
-		<German>Claude Opus</German>
-		<Italian>Claude Opus</Italian>
-		<Spanish>Claude Opus</Spanish>
-	</TEXT>
-	<TEXT>
-		<Tag>TXT_KEY_HANDICAP_MODEL_SONNET</Tag>
-		<English>Claude Sonnet</English>
-		<French>Claude Sonnet</French>
-		<German>Claude Sonnet</German>
-		<Italian>Claude Sonnet</Italian>
-		<Spanish>Claude Sonnet</Spanish>
-	</TEXT>
-	<TEXT>
-		<Tag>TXT_KEY_HANDICAP_MODEL_GPT</Tag>
-		<English>GPT-5.6</English>
-		<French>GPT-5.6</French>
-		<German>GPT-5.6</German>
-		<Italian>GPT-5.6</Italian>
-		<Spanish>GPT-5.6</Spanish>
-	</TEXT>
-	<TEXT>
-		<Tag>TXT_KEY_HANDICAP_MODEL_DEEPSEEK</Tag>
-		<English>DeepSeek V4.1</English>
-		<French>DeepSeek V4.1</French>
-		<German>DeepSeek V4.1</German>
-		<Italian>DeepSeek V4.1</Italian>
-		<Spanish>DeepSeek V4.1</Spanish>
-	</TEXT>
-	<TEXT>
-		<Tag>TXT_KEY_HANDICAP_MODEL_HELP</Tag>
-		<English>This leader is played by an AI model through the CIVAI bridge. Rules as on Noble, no bonuses.</English>
-		<French>This leader is played by an AI model through the CIVAI bridge. Rules as on Noble, no bonuses.</French>
-		<German>This leader is played by an AI model through the CIVAI bridge. Rules as on Noble, no bonuses.</German>
-		<Italian>This leader is played by an AI model through the CIVAI bridge. Rules as on Noble, no bonuses.</Italian>
-		<Spanish>This leader is played by an AI model through the CIVAI bridge. Rules as on Noble, no bonuses.</Spanish>
-	</TEXT>
 </Civ4GameText>

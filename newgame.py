@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Pick who plays each slot of a new game, then start the AIs once the game is on screen.
 
-  ./newgame.py <game-id> new                           # then pick in Custom Game: a row's difficulty "Claude Opus",
-                                                       # "Claude Sonnet", "GPT-5.6" or "DeepSeek V4.1" = that model plays it
+  ./newgame.py <game-id> new                           # then Custom Game as usual: at the start the game asks, leader
+                                                       # by leader, which AI plays it (Claude Opus, Sonnet, GPT, DeepSeek
+                                                       # or the game's own AI)
+  ./newgame.py <game-id> start --wait                  # run before Launch: starts the picked models as soon as all are picked
   ./newgame.py <game-id> 1=opus 2=builtin 3=sonnet     # or pick here: player 0 is you; 1.. are the Custom Game's rows 2..
   ./newgame.py <game-id> start                         # after Launch, when the map is on screen
 
@@ -21,8 +23,7 @@ MODELS = {
 }
 
 
-LEVELS = {"HANDICAP_MODEL_OPUS": "opus", "HANDICAP_MODEL_SONNET": "sonnet", "HANDICAP_MODEL_GPT": "gpt",
-          "HANDICAP_MODEL_DEEPSEEK": "deepseek"}
+MODELS_FILE = os.path.join(BRIDGE, "models.json")   # the in-game picks (the bridge's askModels)
 
 
 def archive_last(game):
@@ -31,7 +32,7 @@ def archive_last(game):
     keep = os.path.join(BRIDGE, "archive", last)
     moved = []
     for f in sorted(os.listdir(BRIDGE)):
-        if (f.startswith("p") and f[1:].isdigit()) or f in ("chat_all.jsonl", "truth.jsonl", "timeline.json"):
+        if (f.startswith("p") and f[1:].isdigit()) or f in ("chat_all.jsonl", "truth.jsonl", "timeline.json", "models.json"):
             os.makedirs(keep, exist_ok=True)
             os.rename(os.path.join(BRIDGE, f), os.path.join(keep, f))
             moved.append(f)
@@ -42,20 +43,19 @@ def archive_last(game):
 
 
 def new(game):
-    """The models are picked in the Custom Game screen (difficulty per row); the bridge treats those rows as agents
-    from the first turn ("players = auto"), so their turns wait for the models."""
+    """The models are picked in the game itself ("players = auto"): the bridge asks the human leader by leader."""
     archive_last(game)
     with open(os.path.join(BRIDGE, "config.txt"), "w") as f:
         f.write("players = auto\nmulti = yes\n")
-    print("config.txt: players = auto. Custom Game: set a row's difficulty to a model; then ./newgame.py %s start" % game)
+    print("config.txt: players = auto. Launch a Custom Game; the game asks who plays each leader. Then ./newgame.py %s start" % game)
 
 
-def picked_in_game():
-    out = subprocess.run([os.path.join(HERE, "civ"), "py", "result=[(i, gc.getHandicapInfo(gc.getPlayer(i).getHandicapType()).getType()) "
-                          "for i in range(gc.getMAX_CIV_PLAYERS()) if gc.getPlayer(i).isEverAlive() and not gc.getPlayer(i).isHuman()]"],
-                         env=dict(os.environ, CIV_DEV="1"), capture_output=True, text=True).stdout
-    import re
-    return ["%s=%s" % (i, LEVELS[t]) for i, t in re.findall(r"\((\d+), u?'(\w+)'\)", out) if t in LEVELS]
+def picked_in_game(wait=False):
+    while True:
+        d = json.load(open(MODELS_FILE)) if os.path.exists(MODELS_FILE) else {}
+        if d.get("done") or not wait:
+            return ["%s=%s" % (k, v) for k, v in sorted(d.items()) if k.isdigit() and v != "builtin"]
+        time.sleep(2)
 
 
 def setup(game, picks):
@@ -77,11 +77,13 @@ def setup(game, picks):
     print("Now: Custom Game, you in row 1, the rows above as AI, Launch; then ./newgame.py %s start" % game)
 
 
-def start(game):
+def start(game, wait=False):
     if not os.path.exists(os.path.join(HERE, "games", game, "seats.json")):
-        picks = picked_in_game()
+        if wait:
+            print("waiting for the picks in the game...", flush=True)
+        picks = picked_in_game(wait)
         if not picks:
-            sys.exit("no row is set to a model level in this game")
+            sys.exit("no leader is picked to be played by a model (yet)")
         seats = [dict({"key": "%s%s" % (m, n), "player": int(n), "effort": "high", "effort_deep": "high"}, **MODELS[m])
                  for n, m in (p.split("=") for p in picks)]
         json.dump({"spectator_name": "V", "seats": seats}, open(os.path.join(HERE, "games", game, "seats.json"), "w"), indent=1)
@@ -102,7 +104,7 @@ if __name__ == "__main__":
     if len(sys.argv) < 3:
         sys.exit(__doc__)
     if sys.argv[2] == "start":
-        start(sys.argv[1])
+        start(sys.argv[1], "--wait" in sys.argv)
     elif sys.argv[2] == "new":
         new(sys.argv[1])
     else:

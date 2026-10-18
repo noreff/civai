@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 170
+BRIDGE_VERSION = 171
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -144,17 +144,9 @@ def seatsConfigured():
 	return bool(configValue("players"))
 
 def modelPlayers():
-	# the Custom Game's choice: a slot whose difficulty is one of the mod's model levels (HANDICAP_MODEL_OPUS...)
-	# is played by that model; the human and the slots on the usual levels are not agents
-	out = []
-	for i in range(gc.getMAX_CIV_PLAYERS()):
-		p = gc.getPlayer(i)
-		if not p.isEverAlive() or p.isHuman():
-			continue
-		t = p.getHandicapType()
-		if t >= 0 and gc.getHandicapInfo(t).getType().startswith("HANDICAP_MODEL_"):
-			out.append(i)
-	return out
+	# config "players = auto": the human picked, in the game, which AI plays each leader (models.json, see askModels)
+	d = loadModels()
+	return [int(k) for k in d.keys() if k.isdigit() and d[k] != "builtin"]
 
 def agentPlayers():
 	v = configValue("players")
@@ -2046,6 +2038,9 @@ def installPatches():
 	em = CvEventInterface.getEventManager()
 	em.Events[CHAT_EVENT_ID] = ("ClaudeChat", chatApply, chatBegin)
 	em.Events[DEAL_EVENT_ID] = ("ClaudeDeal", dealApplyTrampoline, dealBeginTrampoline)
+	em.Events[MODEL_EVENT_ID] = ("ClaudeModel", modelApplyTrampoline, modelBeginTrampoline)
+	if MODEL_EVENT_ID not in CvUtil.SilentEvents:
+		CvUtil.SilentEvents.append(MODEL_EVENT_ID)
 	if DEAL_EVENT_ID not in CvUtil.SilentEvents:
 		CvUtil.SilentEvents.append(DEAL_EVENT_ID)
 	if CHAT_EVENT_ID not in CvUtil.SilentEvents:
@@ -3947,6 +3942,92 @@ def dealApply(playerID, userData, popupReturn):
 	answerOffer(u"%s %d" % (verb, n), playerID)
 	return 0
 
+# ------------------------------------------------- who plays which leader: picked in the game
+#
+# With "players = auto" in config.txt, the human picks at the start, leader by leader, which AI plays it
+# (a popup with the leader's portrait). The picks go to models.json; newgame.py starts those models, and the
+# screen then shows each model's name. Until a leader is picked nothing is decided for it.
+MODEL_EVENT_ID = 5919
+MODELS_FILE = OUT_DIR + "\\models.json"
+MODEL_CHOICES = [("opus", u"Claude Opus"), ("sonnet", u"Claude Sonnet"), ("gpt", u"GPT-5.6 Luna"),
+	("deepseek", u"DeepSeek V4.1 Flash"), ("builtin", u"Civ IV AI (the game's own)")]
+g_modelAsk = {"pending": -1}
+g_modelsCache = {"stamp": None, "data": {}}
+
+def loadModels():
+	# read often (every seat lookup): re-read only when the file changes
+	try:
+		if not os.path.exists(MODELS_FILE):
+			return {}
+		st = os.stat(MODELS_FILE)
+		stamp = (st.st_mtime, st.st_size)
+		if stamp != g_modelsCache["stamp"]:
+			g_modelsCache["data"] = fromJson(open(MODELS_FILE).read()) or {}
+			g_modelsCache["stamp"] = stamp
+		return dict(g_modelsCache["data"])
+	except:
+		log("models.json unreadable:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
+	return {}
+
+def saveModels(d):
+	f = open(MODELS_FILE, "w")
+	f.write(toJson(d))
+	f.close()
+
+def pickablePlayers():
+	out = []
+	for i in range(gc.getMAX_CIV_PLAYERS()):
+		p = gc.getPlayer(i)
+		if p.isEverAlive() and not p.isHuman() and not p.isBarbarian() and not p.isMinorCiv():
+			out.append(i)
+	return out
+
+def askModels():
+	v = configValue("players")
+	if not v or v.strip() != "auto" or g_modelAsk["pending"] >= 0 or not humanPlayers():
+		return
+	d = loadModels()
+	todo = [i for i in pickablePlayers() if not d.has_key(str(i))]
+	if not todo:
+		if not d.get("done"):
+			d["done"] = True
+			saveModels(d)
+			names = [u"%s: %s" % (realName(i), dict(MODEL_CHOICES)[d[str(i)]]) for i in pickablePlayers()]
+			CyInterface().addImmediateMessage(u"Players picked. " + u", ".join(names) + u". The models join in a moment.", "")
+			log("models picked: %s" % toJson(d))
+		return
+	i = todo[0]
+	p = gc.getPlayer(i)
+	import Popup as PyPopup
+	popup = PyPopup.PyPopup(MODEL_EVENT_ID, EventContextTypes.EVENTCONTEXT_ALL)
+	popup.setHeaderString(u"Who plays %s?" % realName(i))
+	try:
+		popup.addDDS(gc.getLeaderHeadInfo(p.getLeaderType()).getButton(), 0, 0, 64, 64)
+	except:
+		pass
+	popup.setBodyString(u"%s of %s. Pick the AI that plays this leader for the whole game." % (realName(i), p.getCivilizationDescription(0)))
+	for key, label in MODEL_CHOICES:
+		popup.addButton(label)
+	popup.setUserData((i,))
+	g_modelAsk["pending"] = i
+	popup.launch(False)
+
+def modelApply(playerID, userData, popupReturn):
+	i = userData[0]
+	k = popupReturn.getButtonClicked()
+	if k >= 0 and k < len(MODEL_CHOICES):
+		d = loadModels()
+		d[str(i)] = MODEL_CHOICES[k][0]
+		saveModels(d)
+	g_modelAsk["pending"] = -1
+	return 0
+
+def modelApplyTrampoline(playerID, userData, popupReturn):
+	return sys.modules["ClaudeBridge"].modelApply(playerID, userData, popupReturn)
+
+def modelBeginTrampoline(argsList=-1):
+	return 0
+
 def dealApplyTrampoline(playerID, userData, popupReturn):
 	return sys.modules["ClaudeBridge"].dealApply(playerID, userData, popupReturn)
 
@@ -5699,6 +5780,11 @@ def poll():
 			os.makedirs(REPLY_DIR)
 		names = [n for n in os.listdir(IN_DIR) if n.endswith(".json")]
 		if gameReady():
+			try:
+				askModels()
+			except:
+				g_modelAsk["pending"] = -1
+				log("model picker FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 			try:
 				readyButHeld()
 			except:
