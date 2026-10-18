@@ -21,6 +21,8 @@ import subprocess
 import sys
 import time
 
+import timeline
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SYSTEM_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out", "system_prompt.md")
 BRIDGE = os.path.expanduser("~/Library/Application Support/CrossOver/Bottles/%s/drive_c/claude_bridge" % os.environ.get("CIV_BOTTLE", "civ4"))
@@ -110,13 +112,11 @@ def brief(events, chat, reasons):
     parts += shown[-100:] or ["(no game events)"]
     parts += ["", "## Chat (the last %d lines; NEW = written to you since your last wake-up)" % CHAT_LINES, ""]
     new_ids = set(json.dumps(c, sort_keys=True) for c in chat)
-    recent, _ = read_from(CHAT, 0)
-    now = game_turn()
-    recent = [c for c in recent if not isinstance(c.get("turn"), int) or c["turn"] <= now]
+    recent = timeline.read(CHAT, timeline.chat_rewind)   # not the abandoned turns of a reload
     parts += ["%sT%s %s: %s" % ("NEW " if json.dumps(c, sort_keys=True) in new_ids and c.get("from") != "claude" else "    ", c.get("turn"),
               "you" if c.get("from") == "claude" else human_name(), c.get("text")) for c in recent[-CHAT_LINES:]] or ["(none)"]
     parts += ["", "## Your last wake-ups (what you did)", ""]
-    parts += recent_wakes(3, now) or ["(none)"]
+    parts += recent_wakes(3) or ["(none)"]
     status = civ("status")
     parts += ambitions_note(status)
     parts += ["", "## State now", "", status, "", civ("research"), "", civ("proposals"), "", civ("offers"), "",
@@ -151,11 +151,17 @@ def my_land_map():
         return "(map unavailable: %s)" % e
 
 
-def recent_wakes(n, now=10 ** 6):
-    # short-term memory: the final words of the last few wake-ups (none from turns after `now`)
+def recent_wakes(n):
+    # short-term memory: the final words of the last few wake-ups of this timeline
     _, d = game_dir()
     names = sorted(os.listdir(os.path.join(d, "wakes")), key=lambda x: os.path.getmtime(os.path.join(d, "wakes", x)))
-    names = [x for x in names if not re.match(r"T(\d+)-", x) or int(re.match(r"T(\d+)-", x).group(1)) <= now]
+    # a wake-up written before a reload, about a turn at or after the reloaded one, belongs to the abandoned timeline
+    cuts = [(time.mktime(time.strptime(w, "%Y-%m-%d %H:%M:%S")), t) for w, t in timeline.rewinds(EVENTS)]
+    def abandoned(x):
+        m = re.match(r"T(\d+)-", x)
+        mt = os.path.getmtime(os.path.join(d, "wakes", x))
+        return bool(m) and any(mt < w and int(m.group(1)) >= t for w, t in cuts)
+    names = [x for x in names if not abandoned(x)]
     out = []
     for name in names[-n:]:
         text = open(os.path.join(d, "wakes", name)).read()
@@ -202,8 +208,10 @@ def prompt_for(d, events, chat, reasons):
     ])
 
 
-def run_agent(cfg, prompt):
+def run_agent(cfg, prompt, resume=None):
     cmd = [a.replace("{prompt}", prompt) for a in cfg["agent"]]
+    if resume:
+        cmd += ["--resume", resume]
     meta = {}
     if cmd and os.path.basename(cmd[0]) == "claude":
         cmd += ["--append-system-prompt-file", SYSTEM_FILE, "--output-format", "json"]
@@ -235,6 +243,70 @@ def run_agent(cfg, prompt):
     return out, time.time() - t0, meta, error
 
 
+LOOKUPS = {"ping", "status", "map", "tile", "odds", "city", "unit", "player", "actions", "offers", "proposals",
+           "tradeable", "relations", "victory", "rules", "area", "around", "where", "card", "chat", "events", "gate",
+           "think", "director", "deals"}
+
+
+def memory_added(d, base="HEAD", head=None):
+    # the lines the agent added to its memory files on this wake-up (before the snapshot commits them)
+    files = [m for m in MEMORY if m != "persona.md"] + ["dossiers"]
+    try:
+        diff = subprocess.run(["git", "diff", "--no-color", "-U0", base] + ([head] if head else []) + ["--"] + files,
+                              cwd=d, capture_output=True, text=True).stdout
+        new = [] if head else subprocess.run(["git", "ls-files", "--others", "--exclude-standard", "--", "dossiers"],
+                                             cwd=d, capture_output=True, text=True).stdout.split()
+    except OSError:
+        return []
+    out, name = [], ""
+    for line in diff.splitlines():
+        if line.startswith("+++ "):
+            name = line[6:]
+        elif line.startswith("+") and line[1:].strip():
+            out.append("%s: %s" % (name, line[1:].strip()))
+    for f in new:
+        out += ["%s: %s" % (f, l.strip()) for l in open(os.path.join(d, f)) if l.strip()]
+    return out
+
+
+CHECK_TURNS = 5             # the self-check compares notes with the chat of this many recent turns
+
+
+def check_prompt(cmds, added, final_words, now=None):
+    # the game's own record (this wake-up's actions, the recent chat) next to what the agent believes it did
+    acts = ["civ " + c["cmd"] for c in cmds if c.get("cmd", "").split(" ")[0] not in LOOKUPS and c["cmd"].split(" ")[0] != "say"]
+    now = game_turn() if now is None else now
+    chat = [c for c in timeline.read(CHAT, timeline.chat_rewind)
+            if isinstance(c.get("turn"), int) and c["turn"] >= now - CHECK_TURNS]
+    return "\n".join([
+        "CHECK before this wake-up ends. Your notes are your only memory, so they must match what really happened.",
+        "",
+        "## The chat of the last %d turns (the game's record: you said only what is here; where anything you saw "
+        "earlier disagrees, this record is right)" % CHECK_TURNS,
+        "",
+        "\n".join("- T%s %s: %s" % (c["turn"], "you" if c.get("from") == "claude" else human_name(), c.get("text"))
+                  for c in chat) or "- (no messages)",
+        "",
+        "## Everything else you did this wake-up (the game's log)",
+        "",
+        "\n".join("- " + a for a in acts) or "- (no deals, answers or orders)",
+        "",
+        "## What you added to your memory files",
+        "",
+        "\n".join("- " + a for a in added) or "- (nothing)",
+        "",
+        "## Your final words",
+        "",
+        final_words.strip() or "(none)",
+        "",
+        "Compare with this record the lines you added, your final words, and every note in your memory files "
+        "about the last %d turns. If one says you said, offered, gave, answered, ordered or did something "
+        "that is not in this record, either do it now with the real command or correct the note. If you promised "
+        "something in a message, it must be in plan.md with its turn. Then reply with one line: what you fixed, "
+        "or 'checked'." % CHECK_TURNS,
+    ])
+
+
 def lines_since(path, pos):
     rows, _ = read_from(path, pos)
     return rows
@@ -252,6 +324,17 @@ def handle(cfg, d, st, events, chat, reasons):
     th_pos = os.path.getsize(thoughts_path) if os.path.exists(thoughts_path) else 0
     out, secs, meta, error = run_agent(cfg, prompt)
     agent_cmds = [c for c in lines_since(cmds_path, cmds_pos) if c.get("by", "agent") == "agent"]   # not the director's
+    check = None
+    added = memory_added(d)
+    if not error and meta.get("session_id") and (added or any(c.get("cmd", "").startswith("say") for c in agent_cmds)):
+        # the same session checks its notes against the game's log and fixes what doesn't match
+        pos = os.path.getsize(cmds_path) if os.path.exists(cmds_path) else 0
+        check, csecs, cmeta, cerr = run_agent(cfg, check_prompt(agent_cmds, added, out), resume=meta["session_id"])
+        fixed = [c for c in lines_since(cmds_path, pos) if c.get("by", "agent") == "agent"]
+        agent_cmds += fixed
+        secs += csecs
+        meta["check"] = {"result": check[-500:], "commands": [c.get("cmd") for c in fixed], "error": cerr,
+                         "total_cost_usd": cmeta.get("total_cost_usd"), "seconds": round(csecs, 1)}
     # the human must never be stuck: if the agent forgot `civ ready` on a turn wake-up, say it for it
     gate = civ("gate")
     forced = False
@@ -267,6 +350,8 @@ def handle(cfg, d, st, events, chat, reasons):
     log += ["- `civ %s`" % c.get("cmd", "") for c in agent_cmds] or ["- (none)"]
     if error:
         log += ["", "**FAILED:** " + error]
+    if check is not None:
+        log += ["", "**Self-check:** " + " ".join(check.split())[:600]]
     log += ["", "**Final words:**", "", out[-3000:], "",
             "_%.0f s, prompt ~%d tokens%s_" % (secs, len(prompt) // 4, ", ready said by the loop" if forced else "")]
     name = "T%s-%s.md" % (str(turn).zfill(3), time.strftime("%H%M%S"))

@@ -359,10 +359,10 @@ def cmd_events(argv):
     if not os.path.exists(EVENTS):
         print("no events yet")
         return
-    with open(EVENTS) as f:
-        lines = f.readlines()[-n:]
-    for line in lines:
-        e = json.loads(line)
+    sys.path.insert(0, HERE)
+    import timeline
+    for e in timeline.read(EVENTS, timeline.event_rewind, keep_markers=True)[-n:]:   # not the abandoned turns of a reload
+        e.pop("wall", None)
         head = "T%-4d %-8s %s" % (e.pop("turn"), year(e.pop("year")), e.pop("kind"))
         e.pop("time", None)
         print(head + ("  " + fmt_inline(e) if e else ""))
@@ -560,10 +560,10 @@ def main(argv):
         elif cmd == "chat":
             n = int(argv[1]) if len(argv) > 1 else 20
             if os.path.exists(CHAT):
-                with open(CHAT) as f:
-                    for line in f.readlines()[-n:]:
-                        m = json.loads(line)
-                        print("T%-4d %s %-7s %s" % (m["turn"], m["time"], m["from"], m["text"]))
+                sys.path.insert(0, HERE)
+                import timeline
+                for m in timeline.read(CHAT, timeline.chat_rewind)[-n:]:   # not the abandoned turns of a reload
+                    print("T%-4d %s %-7s %s" % (m["turn"], m["time"], m["from"], m["text"]))
             else:
                 print("no messages yet")
         elif cmd == "director":

@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 61
+BRIDGE_VERSION = 62
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -298,7 +298,15 @@ def rewindCheck():
 	o = loadProposals()
 	o["open"] = {}
 	saveProposals(o)
-	writeEvent("rewind", {"from_turn": last, "to_turn": now, "note": "an older save was loaded: unit orders, "
+	# the logs are append-only: these markers tell every reader that the later turns logged before them never happened
+	wall = time.strftime("%Y-%m-%d %H:%M:%S")
+	ensureDir()
+	f = open(CHAT_FILE, "ab")
+	try:
+		f.write(toJson({"from": "system", "rewind_to": now, "turn": now, "text": "", "time": time.strftime("%H:%M:%S")}) + "\n")
+	finally:
+		f.close()
+	writeEvent("rewind", {"from_turn": last, "to_turn": now, "wall": wall, "note": "an older save was loaded: unit orders, "
 		"build lists and open questions from the later turns were cleared; your memory files may describe turns "
 		"that haven't happened in this replay"})
 
@@ -2600,19 +2608,22 @@ def makePeaceTradeVal(peace, taker):
 def warDeclaredBy(a, b):
 	# which side declared the current war between teams a and b (from our own event log)
 	names = (gc.getTeam(a).getName(), gc.getTeam(b).getName())
-	who = None
+	found = []   # (turn, declaring team) in log order; a reload drops the declarations of its abandoned turns
 	try:
 		for line in open(EVENTS_FILE):
-			if '"war_declared"' not in line:
+			if '"rewind"' not in line and '"war_declared"' not in line:
 				continue
 			try:
 				e = fromJson(line)
 			except:
 				continue
-			if e.get("team") in names and e.get("against") in names:
-				who = e.get("team")
+			if e.get("kind") == "rewind":
+				found = [x for x in found if x[0] < e.get("to_turn", 10 ** 6)]
+			elif e.get("kind") == "war_declared" and e.get("team") in names and e.get("against") in names:
+				found.append((e.get("turn", 0), e.get("team")))
 	except:
 		pass
+	who = found and found[-1][1] or None
 	if who == names[0]:
 		return a
 	if who == names[1]:

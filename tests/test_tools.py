@@ -56,13 +56,24 @@ def test_offer_arguments():
     assert give == ["peace"] and get == ["peace", "gold:600", "tech:Code of Laws", "map"]
 
 
-def test_brief_filters_future_wakes():
-    import importlib.util
+def test_timeline_drops_abandoned_turns():
+    import timeline
+    rows = [{"turn": 395, "text": "a"}, {"turn": 397, "text": "ghost"}, {"turn": 408, "text": "ghost"},
+            {"rewind_to": 396, "turn": 396}, {"turn": 396, "text": "b"}, {"turn": 408, "text": "c"}]
+    assert [r["text"] for r in timeline.current(rows, timeline.chat_rewind)] == ["a", "b", "c"]
+    rows = [{"kind": "war_declared", "turn": 400}, {"kind": "rewind", "to_turn": 396, "turn": 396}, {"kind": "x", "turn": 397}]
+    assert [r["kind"] for r in timeline.current(rows, timeline.event_rewind, keep_markers=True)] == ["rewind", "x"]
+
+
+def test_brief_skips_abandoned_wakes():
+    import importlib.util, re, time
     spec = importlib.util.spec_from_file_location("loop", os.path.join(HERE, "loop.py"))
     loop = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(loop)
-    lines = loop.recent_wakes(50, 0)
-    assert lines == [], "no wake-up of a later turn may reach the brief"
+    for w, t in loop.timeline.rewinds(loop.EVENTS):
+        for line in loop.recent_wakes(500):
+            m = re.match(r"- Wake-up \d+, turn (\d+) \(([\d-]+ [\d:]+)\)", line)
+            assert not (m and int(m.group(1)) >= t and m.group(2) < w), "a wake-up of an abandoned timeline reached the brief"
 
 
 if __name__ == "__main__":
