@@ -56,8 +56,34 @@ def config(game):
     print("config.txt: players = %s" % players)
 
 
+def manifest(game):
+    """What this game ran on, for the paper: seats and models, file hashes, the game's own settings."""
+    import hashlib
+    h = lambda path: hashlib.sha256(open(path, "rb").read()).hexdigest()[:16] if os.path.exists(path) else None
+    bts = os.path.join(os.path.dirname(BRIDGE), "GOG Games/Civilization IV Complete/Civ4/Beyond the Sword/Mods/CIVAI/Assets")
+    files = {"bridge": os.path.join(HERE, "mod/CIVAI/Assets/Python/ClaudeBridge.py"), "playbook": os.path.join(HERE, "PLAYBOOK.md"),
+             "loop": os.path.join(HERE, "loop.py"), "civ": os.path.join(HERE, "civ"), "mapview": os.path.join(HERE, "mapview.py"),
+             "engine_dll": os.path.join(bts, "CvGameCoreDLL.dll")}
+    env = dict(os.environ, CIV_DEV="1")
+    code = ("g = CyGame(); m = CyMap()\n"
+            "result = {'turn': g.getGameTurn(), 'max_turns': g.getMaxTurns(), 'speed': gc.getGameSpeedInfo(g.getGameSpeedType()).getType(),"
+            " 'map_size': gc.getWorldInfo(m.getWorldSize()).getType(), 'map_w': m.getGridWidth(), 'map_h': m.getGridHeight(),"
+            " 'difficulty': gc.getHandicapInfo(g.getHandicapType()).getType(),"
+            " 'players': [(i, gc.getPlayer(i).getName(), gc.getPlayer(i).getCivilizationShortDescription(0), gc.getPlayer(i).isHuman()) "
+            "for i in range(gc.getMAX_CIV_PLAYERS()) if gc.getPlayer(i).isEverAlive()]}")
+    r = subprocess.run([os.path.join(HERE, "civ"), "py", code], capture_output=True, text=True, env=env)
+    m = {"game": game, "written": time.strftime("%Y-%m-%d %H:%M:%S"), "seats": seats(game),
+         "hashes": {k: h(v) for k, v in files.items()}, "game_settings": r.stdout.strip()}
+    path = os.path.join(HERE, "games", game, "manifest.json")
+    history = json.load(open(path)) if os.path.exists(path) else []
+    history.append(m)   # one entry per start: a change of tools mid-game shows up here
+    json.dump(history, open(path, "w"), indent=1)
+    print("manifest: %d entries" % len(history))
+
+
 def start(game):
     config(game)
+    manifest(game)
     if not alive(pidfile(game, "broker")):
         spawn(game, "broker", [sys.executable, os.path.join(HERE, "broker.py"), game],
               os.path.join(HERE, "games", game, "broker.log"))
