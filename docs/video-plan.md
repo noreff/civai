@@ -29,6 +29,14 @@ Running gags carried through sections 3–5 (from the first study): the said/mea
 
 ---
 
+### Game cinematics (his choice, 2026-10-19)
+
+Converted from the game's own Bink files to `video/game-movies/` (720x486, NTSC 4:3; upscale before use in a 16:9 / 4K cut, e.g. with an upscaler in ComfyUI, and pillarbox or crop):
+- `bts-intro.mp4` (1:33, Beyond the Sword intro: parchment, wax seal, ships, cannons, Lincoln, the nuclear briefcase, the BtS title) and `civ4-intro.mp4` (2:39, the base game's intro): the picture under **his intro** (section 1), instead of Test D's victory screen as the first image.
+- `victory-space-race.mp4` (0:24, the Space Race victory movie: the ship in space, the stasis pods, the colonist at the window over a new planet): under **Test D's end** (Peter wins by space) and **Test F's end** (Opus wins by space), right after the game's own "Wins a Space Race Victory!!!!" banner.
+Game cinematics belong to Firaxis/2K; short pieces are common in game videos, but YouTube can flag them: keep each under ~20 s and under the voice.
+
+
 ## 2. Footage inventory
 
 All paths read-only. Recordings are named by their start time (Pacific, the Mac's clock); offsets below were computed from the log's wall time against the file start, and spot-checked by pulling frames.
