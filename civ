@@ -14,6 +14,7 @@
   civ move <id> X Y [--stack] [--attack]  walk a unit to X Y (several turns if needed); the unit becomes yours.
                            It leaves any stack it is in; --stack moves the whole stack with it. A tile with
                            enemy units is an attack: refused with the odds unless --attack
+  civ units                all our units, one per line (id, type, place, moves, level)
   civ actions <unit id>    what the unit can do right now (the game's own buttons)
   civ espionage [<leader> <weight>]   espionage points against each leader, and how new points are split
                            (the Espionage screen); with a leader and a weight, sets that weight
@@ -341,7 +342,7 @@ def units_by_tile(s, players):
 
 LOOKUPS = {"ping", "status", "map", "tile", "odds", "city", "unit", "player", "actions", "offers", "proposals",
            "tradeable", "relations", "victory", "rules", "area", "around", "where", "card", "chat", "events", "deals",
-           "think", "director"}
+           "think", "director", "units"}
 SHOW_WITHOUT_ARGS = {"research", "budget", "religion", "civics", "gate", "hurry", "espionage"}
 
 
@@ -666,10 +667,15 @@ def main(argv):
                     args[flag] = True
             print(fmt_record(call("build", args)))
         elif cmd == "hurry":
-            args = {"name": argv[1]}
-            if len(argv) > 2:
-                args["how"] = argv[2]
+            # "civ hurry New Sarai whip": the city's name may have several words; the last word may say how
+            words = argv[1:]
+            args = {"name": " ".join(words)}
+            if len(words) > 1 and words[-1].lower() in ("gold", "buy", "whip", "pop", "population"):
+                args = {"name": " ".join(words[:-1]), "how": words[-1]}
             print(fmt_record(call("hurry", args)))
+        elif cmd == "units":
+            s = call("status")
+            print("\n".join(units_one_per_line(s, {p["id"]: p for p in s["players"]})))
         elif cmd == "hold":
             print(fmt_record(call("hold")))
         elif cmd == "gate":

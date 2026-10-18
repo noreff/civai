@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 119
+BRIDGE_VERSION = 120
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -2032,6 +2032,9 @@ def cmdDo(args):
 		return doSpyMission(u, (want + " " + (args.get("target") or "")).strip())
 	acts = unitActions(u)
 	want = ACTION_WORDS.get(want, want)
+	if want in ("FORTIFY", "SLEEP", "SENTRY") and "WAKE" in [n for (n, a, t) in acts]:
+		# already fortified or asleep: the order is already in effect
+		return {"id": u.getID(), "already": "the unit is already fortified or asleep (WAKE to wake it)"}
 	match = [x for x in acts if x[0] == want]
 	if not match:
 		# the start or part of an available action's name, if only one fits ("FARM" -> BUILD_FARM)
@@ -4150,7 +4153,8 @@ def findInfo(want, count, getter, prefix):
 	w = want.strip().lower().replace(" ", "_").replace("-", "_")
 	if not w:
 		return -1
-	names = [(i, getter(i).getType().lower(), getter(i).getDescription().lower().replace(" ", "_")) for i in range(count)]
+	names = [(i, getter(i).getType().lower(), getter(i).getDescription().lower().replace(" ", "_").replace("-", "_"))
+		for i in range(count)]
 	for cand in (w, w.endswith("s") and w[:-1] or None, w.endswith("es") and w[:-2] or None):
 		if not cand:
 			continue
