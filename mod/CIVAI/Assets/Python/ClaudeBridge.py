@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 104
+BRIDGE_VERSION = 105
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -4423,6 +4423,40 @@ def humanTurn():
 			return t
 	return t + 1
 
+g_heldSince = {}
+
+def readyButHeld():
+	# an agent said ready but the engine still holds its turn (a unit left "ready to move" that the engine's
+	# own unit update didn't reach). After a minute: log what holds it (to find the cause) and let the bridge's
+	# unit hook answer for those units, as the engine should have
+	if not seatsConfigured():
+		return
+	now = time.time()
+	for i in agentPlayers():
+		p = gc.getPlayer(i)
+		if not (p.isAlive() and p.isTurnActive() and p.isClaudeReady()):
+			g_heldSince.pop(i, None)
+			continue
+		since = g_heldSince.setdefault(i, now)
+		if now - since < 60:
+			continue
+		g_heldSince[i] = now   # at most once a minute
+		held, busy = [], []
+		import CvGameInterfaceFile
+		(u, it) = p.firstUnit(False)
+		while u and not u.isNone():
+			g = u.getGroup()
+			if g.getHeadUnit().getID() == u.getID():
+				if g.readyToMove(False):
+					held.append(u)
+				elif g.getLengthMissionQueue() > 0:
+					busy.append("#%d %s" % (u.getID(), gc.getUnitInfo(u.getUnitType()).getType()))
+			(u, it) = p.nextUnit(it, False)
+		log("player %d ready but its turn is held: ready-to-move %s; with orders %s" % (i,
+			["#%d %s at %d,%d" % (x.getID(), gc.getUnitInfo(x.getUnitType()).getType(), x.getX(), x.getY()) for x in held], busy))
+		for u in held:
+			asSeatOf(i, aiUnitUpdate, CvGameInterfaceFile.GameUtils, [u])
+
 def ensureSimultaneousTurns():
 	# several agents play each turn at once (like a simultaneous-turns multiplayer game): every civ's turn
 	# is active together, so an agent's order runs when given, not after the civs before it are done
@@ -4777,6 +4811,10 @@ def poll():
 			os.makedirs(REPLY_DIR)
 		names = [n for n in os.listdir(IN_DIR) if n.endswith(".json")]
 		if gameReady():
+			try:
+				readyButHeld()
+			except:
+				log("ready-but-held check FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 			try:
 				ensureSimultaneousTurns()
 			except:
