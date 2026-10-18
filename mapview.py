@@ -27,6 +27,8 @@ TERRAIN = {"TERRAIN_GRASS": "grass", "TERRAIN_PLAINS": "plains", "TERRAIN_DESERT
            "TERRAIN_OCEAN": "ocean", "TERRAIN_PEAK": "peak"}
 FEAT = {"FEATURE_FOREST": "forest", "FEATURE_JUNGLE": "jungle", "FEATURE_FLOOD_PLAINS": "flood plains",
         "FEATURE_OASIS": "oasis", "FEATURE_ICE": "ice"}
+DIR_INDEX = {"N": 0, "NE": 1, "E": 2, "SE": 3, "S": 4, "SW": 5, "W": 6, "NW": 7}   # the game's DirectionTypes
+OPPOSITE = {"N": "S", "NE": "SW", "E": "W", "SE": "NW", "S": "N", "SW": "NE", "W": "E", "NW": "SE"}
 DIRS = [("N", 0, 1), ("NE", 1, 1), ("E", 1, 0), ("SE", 1, -1), ("S", 0, -1), ("SW", -1, -1), ("W", -1, 0), ("NW", -1, 1)]
 CIVILIAN = ("WORKER", "BOAT", "EXPLORER", "SETTLER", "PROPHET", "MISSIONARY", "SCOUT", "GREAT", "ARTIST",
             "ENGINEER", "MERCHANT", "SCIENTIST", "SPY", "EXECUTIVE")
@@ -222,25 +224,38 @@ def battle_card(target):
     L.append("  ground under the city: %s -> %s" % (ground(p), "defenders get the HILL bonus" if p[2] == 1 else "NO hill bonus for defenders"))
     L.append("  seen right now: %s" % ("yes" if p[10] else "no, fog (what follows may be stale)"))
     L.append("  defenders seen inside: %s" % (units_at(target) or "none seen"))
-    L.append("THE 8 TILES AROUND IT, best to worst to attack from (HILL +25%, forest/jungle +50% for whoever stands there):")
+    L.append("THE 8 TILES AROUND IT to attack from, best first. Standing there: HILL +25%, forest/jungle +50% defence for your stack "
+             "when they strike back. Attacking ACROSS A RIVER: -25% on every attack. Tiles with the same rating are equally good.")
     rows = []
     for name, dx, dy in DIRS:
         n = (target[0] + dx, target[1] + dy)
         q = PLOTS.get(n)
         if not q:
-            rows.append((-50, name, n, None))
+            rows.append((-50, 0, name, n, None, False))
             continue
-        score = -99 if q[2] in (0, 3) else (2 if q[2] == 1 else 0) + (1 if q[4] in ("FEATURE_FOREST", "FEATURE_JUNGLE") else 0)
-        rows.append((score, name, n, q))
+        if q[2] in (0, 3):
+            rows.append((-99, 0, name, n, q, False))
+            continue
+        defence = (25 if q[2] == 1 else 0) + (50 if q[4] in ("FEATURE_FOREST", "FEATURE_JUNGLE") else 0)
+        to_city = DIR_INDEX[OPPOSITE[name]]
+        river = len(q) > 11 and bool(q[11] & (1 << to_city))
+        rows.append(((0 if river else 25) + defence, defence, name, n, q, river))
     rows.sort(key=lambda r: -r[0])
-    for score, name, n, q in rows:
+    for score, defence, name, n, q, river in rows:
         if q is None:
             L.append("  %-2s %d,%d: never seen" % (name, n[0], n[1]))
         elif score == -99:
             L.append("  %-2s %d,%d: %s (can't stand here)" % (name, n[0], n[1], ground(q)))
         else:
             c2 = [z for z in contents(n) if not z.startswith("CITY")]
-            L.append("  %-2s %d,%d: %s; %s%s" % (name, n[0], n[1], ground(q), land(q), "  [" + "; ".join(c2) + "]" if c2 else ""))
+            allies = sorted(set(u[2] for u in UNITS.get(n, []) if u[2] != ME and u[5] and u[2] in PLAYERS and not at_war(u[2])))
+            note = "rating %d: %s, %s" % (score, "+%d%% defence" % defence if defence else "no defence bonus",
+                                         "attacks cross a river (-25%)" if river else "no river to cross")
+            if allies:
+                note += "; %s's army is here: share the tile and their best defender guards your units too" % \
+                        ", ".join(owner_name(o, short=True) for o in allies)
+            L.append("  %-2s %d,%d: %s; %s  [%s]%s" % (name, n[0], n[1], ground(q), land(q), note,
+                                                      "  [" + "; ".join(c2) + "]" if c2 else ""))
     src = nearest_own_city(target)
     if src:
         path = straight_path(src, target)

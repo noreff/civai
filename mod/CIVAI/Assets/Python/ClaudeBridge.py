@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 48
+BRIDGE_VERSION = 49
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -235,6 +235,7 @@ def collectPlots(iMe):
 				infoType(gc.getRouteInfo, pl.getRevealedRouteType(iTeam, False)),
 				pl.isRiver(),
 				vis,
+				riverEdges(pl),
 			])
 			if pl.isCity():
 				c = pl.getPlotCity()
@@ -255,6 +256,16 @@ def collectPlots(iMe):
 					units.append([x, y, key[0], key[1], counts[key], info.getCombat() > 0])
 	return w, h, plots, cities, units
 
+def riverEdges(pl):
+	# which of the 8 directions cross a river from this tile (bit d = DirectionTypes d; attacking across costs 25%)
+	if not pl.isRiver():
+		return 0
+	m = 0
+	for d in range(8):
+		if pl.isRiverCrossing(DirectionTypes(d)):
+			m = m | (1 << d)
+	return m
+
 def dump(reason):
 	iMe = getClaudePlayer()
 	if iMe < 0:
@@ -274,7 +285,7 @@ def dump(reason):
 		"players": collectPlayers(iMe),
 		"my_empire": collectMyEmpire(iMe),
 		"plot_fields": ["x", "y", "plotType", "terrain", "feature", "bonus", "owner",
-			"improvement", "route", "river", "visible"],
+			"improvement", "route", "river", "visible", "river_crossings"],
 		"plots": plots,
 		"cities": cities,
 		"unit_fields": ["x", "y", "owner", "type", "count", "military"],
@@ -1086,12 +1097,20 @@ def cmdMove(args):
 		raise Exception("no such tile %d,%d" % (x, y))
 	g = u.getGroup()
 	before = (u.getX(), u.getY())
+	turns = -1
+	if hasattr(g, "claudePathTurns"):
+		turns = g.claudePathTurns(x, y)   # the game's pathfinder: terrain, roads, rivers, this unit's speed
 	setClaim(u.getID(), [x, y])
 	g.pushMission(MissionTypes.MISSION_MOVE_TO, x, y, 0, False, True, MissionAITypes.NO_MISSIONAI, pl, u)
 	if (u.getX(), u.getY()) == before and g.getLengthMissionQueue() == 0 and before != (x, y):
 		raise Exception("unit #%d did not accept the move to %d,%d (unreachable or no moves?)" % (u.getID(), x, y))
-	return {"id": u.getID(), "from": before, "now_at": (u.getX(), u.getY()), "target": (x, y),
+	r = {"id": u.getID(), "from": before, "now_at": (u.getX(), u.getY()), "target": (x, y),
 		"moves_left": u.movesLeft(), "missions_queued": g.getLengthMissionQueue()}
+	if turns >= 0:
+		r["arrives"] = "in %d of our turns by the game's pathfinder (a group moves at its slowest unit's pace)" % turns
+	if not gc.getPlayer(u.getOwner()).isTurnActive():
+		r["when"] = "it moves in our own turn, which comes after the human ends theirs: they see it there only then"
+	return r
 
 # --------------------------------------------------------------------- chat
 #
