@@ -852,6 +852,7 @@ def handle(cfg, d, st, events, chat, reasons):
     out, secs, meta, error = run_agent(wcfg, prompt, system_file=sysf)
     meta["effort"] = wcfg.get("effort")
     meta["kind"] = kind
+    st["last_kind"] = kind
     if kind == "council" and not error:
         st["last_council"] = game_turn()
     if kind == "audience":
@@ -1066,6 +1067,15 @@ def main():
             # say so on screen, and wait longer each time (or until a usage limit says it resets). A seat's
             # civ is still not ready, so a game of several leaders waits for it: no one plays a turn short
             failures += 1
+            if refused(error) and st.get("last_kind") == "audience":
+                # a refused audience is not retried: the message stays in the court chat of the next turn's brief,
+                # and the turn itself was never waiting on it
+                st["events_pos"], st["chat_pos"] = epos, cpos
+                save_state(d, st)
+                with open(os.path.join(d, "wake_stats.jsonl"), "a") as f:
+                    f.write(json.dumps({"turn": game_turn(), "skipped": "audience refused by the content filter",
+                                        "error": error[:300], "wall": time.strftime("%Y-%m-%d %H:%M:%S")}) + "\n")
+                continue
             if refused(error):
                 # the model's content filter refused this wake-up (a false alarm on war talk, say). It may pass on
                 # a retry; after a few refusals on one turn the seat passes that turn, so the game never stalls
