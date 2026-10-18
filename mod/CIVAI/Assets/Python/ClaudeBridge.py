@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 165
+BRIDGE_VERSION = 166
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -4084,7 +4084,10 @@ def answerProposal(n, yes, why=None):
 		closed = (o.get("closed") or {}).get(str(n))
 		if closed:
 			raise Exception("proposal #%s is closed: %s (civ proposals lists the open ones)" % (n, closed))
-		raise Exception("no proposal #%s (civ proposals lists the open ones)" % n)
+		openNow = ["#%s %s" % (k, x.get("comment") == "election" and "(choose the resolution: civ answer %s <option number>)" % k
+			or "(civ answer %s yes|no)" % k) for k, x in o["open"].items()]
+		raise Exception("no proposal #%s. Its number is the proposal's, not an option's. Open now: %s" % (n,
+			", ".join(openNow) or "none"))
 	ai = gc.getPlayer(v["from"])
 	gives = [tuple(x) for x in v["gives"]]
 	wants = [tuple(x) for x in v["wants"]]
@@ -4262,7 +4265,8 @@ def expireProposals():
 def cmdProposals(args):
 	o = loadProposals()
 	return {"open": ["#%s (turn %d): %s" % (k, v["turn"], proposalText(v)) for k, v in o["open"].items()] or ["none"],
-		"answer": "civ answer N yes|no"}
+		"answer": "civ answer N yes|no; a resolution to choose: civ answer N <option number>",
+		"resolutions": "as Resident, the choice of a resolution arrives here as a proposal when the session opens (an event wakes you)"}
 
 def newElection(me, selId, source, options):
 	# the agent Resident picks the resolution (the engine waits for CyGame.claudeChooseElection)
@@ -5038,7 +5042,7 @@ def cmdVotes(args):
 			"members (leaders you know)": members or ["none"],
 			"next session in turns": g.getVoteTimer(vs),
 			"next session holds": sessions == 0 and "the election of the Resident (no resolution that session)" or
-				"a resolution the Resident chooses",
+				"a resolution the Resident chooses (the Resident gets it as a proposal when the session opens)",
 			"next Resident election in turns": g.getVoteTimer(vs) + sessions * (every + 1),
 			"diplomatic victory": victoryVotes(vs) or ["no resolution here wins the game"]}
 	return out
