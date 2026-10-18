@@ -538,7 +538,7 @@ CLOSINGS = {
                "`ambitions.md` and the dossiers that changed (every leader you have met gets a dossier with a Stance "
                "line). Then the turn's orders and `civ ready`.",
     "audience": "Someone spoke to you or asks something of you (above). What do they want, what is it worth to you, and "
-                "what does it tell you about them? Answer as yourself (`civ say --think \"...\" \"...\"`, `civ answer`, "
+                "what does it tell you about them? Answer as yourself (`civ say --aim \"...\" \"...\"`, `civ answer`, "
                 "`civ offer`), refuse, or ignore on purpose, and write the exchange into their dossier.",
     "founding": "You have just taken the throne. Write `persona.md` in your own words, under 120 words: your voice; what "
                 "you value; how you treat strangers and rivals; how you bargain; when you keep your word and when you "

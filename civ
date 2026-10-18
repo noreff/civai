@@ -100,7 +100,7 @@
                            turns to the next session (resolution or Resident election), what it holds, and the share of votes a diplomatic victory needs
   civ work <city> [X Y | <specialist> +N|-N | auto]   which tiles the citizens work (a human's clicks on the
                            city screen): no more words shows them; X Y takes or frees a tile; auto: the governor
-  civ say --think "<thought>" "<text>"   the thought behind it and the message, in one call
+  civ say --aim "<aim>" "<text>"   the message's aim (private, one short line) and the message, in one call
   civ say --to <leader> "<text>"   (a game of several AI leaders) a private message only that leader
                            reads; without --to every leader who has met you reads it
   civ chat [N]             last N chat messages both ways (default 20); works without the game
@@ -685,9 +685,10 @@ def main(argv):
         elif cmd == "release":
             print(fmt_record(call("release", {"id": argv[1] if argv[1] == "all" else int(argv[1])})))
         elif cmd == "say":
-            if "--think" in argv[:-1]:
-                # the thought and the message in one call: `civ say [--to X] --think "what I think" "message"`
-                i = argv.index("--think")
+            flag = [f for f in ("--aim", "--think") if f in argv[:-1]]
+            if flag:
+                # the aim and the message in one call: `civ say [--to X] --aim "what this message is for" "message"`
+                i = argv.index(flag[0])
                 tid = uuid.uuid4().hex[:10]
                 video_log("thoughts.jsonl", {"id": tid, "text": argv[i + 1]})
                 with open(os.path.join(VIDEO_LOG_DIR, ".last_thought"), "w") as f:
@@ -695,8 +696,8 @@ def main(argv):
                 argv = argv[:i] + argv[i + 2:]
             if not os.path.exists(os.path.join(VIDEO_LOG_DIR, ".last_thought")):
                 # every message is paired with what its speaker really thinks (said vs thought, for the video and the record)
-                print('ERROR: first write what you really think and want behind this message: civ think "..." '
-                      '(private; then civ say)', file=sys.stderr)
+                print('ERROR: first note this message\'s aim in one short line: civ say --aim "what it is for" "message" '
+                      '(private)', file=sys.stderr)
                 return 1
             popup = len(argv) > 1 and argv[1] == "--popup"
             to = argv[2] if len(argv) > 2 and argv[1] == "--to" else None
