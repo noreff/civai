@@ -22,6 +22,7 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+SYSTEM_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out", "system_prompt.md")
 BRIDGE = os.path.expanduser("~/Library/Application Support/CrossOver/Bottles/%s/drive_c/claude_bridge" % os.environ.get("CIV_BOTTLE", "civ4"))
 EVENTS = os.path.join(BRIDGE, "events.jsonl")
 CHAT = os.path.join(BRIDGE, "chat.jsonl")
@@ -173,13 +174,18 @@ def prompt_for(d, events, chat, reasons):
     if size > MEMORY_TOKENS_WARN:
         warn = ("\n\n**Your memory files are ~%d tokens (over %d). Trim them on this wake-up: rewrite plan.md to "
                 "about a page, compress old chronicle eras, keep dossiers as summaries.**" % (size, MEMORY_TOKENS_WARN))
-    # fixed parts first (they stay cached between wake-ups), fresh parts last
-    return "\n\n".join([
-        "You are the leader in persona.md, playing the current CIVAI game to win. This is ONE wake-up: act on it and finish. "
+    # the unchanging part goes into the system prompt (cached between wake-ups); the user message has
+    # the memory files (they change on most wake-ups) and the brief
+    system = "\n\n".join([
+        "You are the leader in persona.md, playing the current CIVAI game to win. Each message is ONE wake-up: act on it and finish. "
         "You remember nothing between wake-ups except the files in the game folder, so before you finish, "
-        "write down in them whatever your future self must know. The playbook is your full instruction set; "
+        "write down in them whatever your future self must know. The playbook below is your full instruction set; "
         "skip its 'Start of a session' and 'Turn loop' listening steps: the loop wakes you.",
         "# PLAYBOOK\n\n" + playbook,
+    ])
+    with open(SYSTEM_FILE, "w") as f:
+        f.write(system)
+    return "\n\n".join([
         "# YOUR MEMORY FILES (game folder: %s)\n\n" % d + "\n\n".join(memory),
         "# BRIEF\n\n" + brief(events, chat, reasons) + warn,
     ])
@@ -187,6 +193,8 @@ def prompt_for(d, events, chat, reasons):
 
 def run_agent(cfg, prompt):
     cmd = [a.replace("{prompt}", prompt) for a in cfg["agent"]]
+    if cmd and os.path.basename(cmd[0]) == "claude":
+        cmd += ["--append-system-prompt-file", SYSTEM_FILE]
     stdin = None if any("{prompt}" in a for a in cfg["agent"]) else prompt
     t0 = time.time()
     try:
