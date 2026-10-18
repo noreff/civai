@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 93
+BRIDGE_VERSION = 94
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3669,7 +3669,10 @@ def cmdVictory(args):
 		elif info.isEndScore():
 			r["time"] = "at the last turn (%d) the highest score wins" % (g.getMaxTurns() or g.getEstimateEndTurn())
 		elif info.isTargetScore():
-			r["score"] = "the first to reach the target score wins"
+			if g.getTargetScore() > 0:
+				r["score"] = "the first to reach %d points wins" % g.getTargetScore()
+			else:
+				r["score"] = "no target score is set in this game, so this road can't end it (at the last turn the time victory goes to the highest score)"
 		else:
 			r[t.replace("VICTORY_", "").lower()] = info.getDescription()
 	return r
@@ -4153,6 +4156,17 @@ def cmdBuild(args):
 		"turns": c.getProductionTurnsLeft()}
 
 
+def hurryCivics(have):
+	# the hurry kinds we can't use now, and the civics that allow them (the game's rule)
+	out = []
+	for h in range(gc.getNumHurryInfos()):
+		if h in have:
+			continue
+		civics = [gc.getCivicInfo(k).getDescription() for k in range(gc.getNumCivicInfos()) if gc.getCivicInfo(k).isHurry(h)]
+		name = gc.getHurryInfo(h).getType()[len("HURRY_"):].lower()
+		out.append("%s: %s" % (name, civics and "needs the civic " + " or ".join(civics) or "not possible for this build"))
+	return out or ["-"]
+
 def cmdHurry(args):
 	# the game's Hurry button: whip (population) or buy (gold), whatever our civics allow.
 	# Without "how", it only shows the options and their price.
@@ -4172,7 +4186,8 @@ def cmdHurry(args):
 	if not args.get("how"):
 		return {"city": c.getName(), "building": building, "turns_left": c.getProductionTurnsLeft(),
 			"can_hurry": ["%s: costs %d population and %d gold, unhappiness for %d turns" % (n, pop, gold, anger)
-				for (n, h, pop, gold, anger) in opts] or ["no (civics, or nothing that can be hurried)"]}
+				for (n, h, pop, gold, anger) in opts] or ["no"],
+			"other_ways": hurryCivics([o[1] for o in opts])}
 	want = args["how"].lower()
 	m = [o for o in opts if o[0] == want or (want == "whip" and o[2] > 0) or (want in ("buy", "gold") and o[2] == 0 and o[3] > 0)]
 	if not m:
