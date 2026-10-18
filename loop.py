@@ -209,6 +209,7 @@ def run_agent(cfg, prompt):
         cmd += ["--append-system-prompt-file", SYSTEM_FILE, "--output-format", "json"]
     stdin = None if any("{prompt}" in a for a in cfg["agent"]) else prompt
     t0 = time.time()
+    error = None
     try:
         env = {k: v for k, v in os.environ.items() if not k.startswith("CIV_") or k in ("CIV_BOTTLE", "CIV_GAME")}
         env["CIV_ACTOR"] = "agent"   # marks the player's own commands in the logs
@@ -221,11 +222,17 @@ def run_agent(cfg, prompt):
                 data = json.loads(out)
                 out = data.get("result") or ""
                 meta = {k: data.get(k) for k in ("session_id", "total_cost_usd", "num_turns", "duration_ms", "usage", "modelUsage")}
+                if data.get("is_error"):
+                    error = out or data.get("subtype") or "error"
             except ValueError:
                 pass
+        if r.returncode != 0 and not error:
+            error = (out or "exit code %d" % r.returncode)[-300:]
     except subprocess.TimeoutExpired:
         out = "(timed out)"
-    return out, time.time() - t0, meta
+    except OSError as e:
+        out = error = "could not start the agent: %s" % e
+    return out, time.time() - t0, meta, error
 
 
 def lines_since(path, pos):
@@ -243,7 +250,7 @@ def handle(cfg, d, st, events, chat, reasons):
         turn = m.group(1)
     cmds_pos = os.path.getsize(cmds_path) if os.path.exists(cmds_path) else 0
     th_pos = os.path.getsize(thoughts_path) if os.path.exists(thoughts_path) else 0
-    out, secs, meta = run_agent(cfg, prompt)
+    out, secs, meta, error = run_agent(cfg, prompt)
     agent_cmds = [c for c in lines_since(cmds_path, cmds_pos) if c.get("by", "agent") == "agent"]   # not the director's
     # the human must never be stuck: if the agent forgot `civ ready` on a turn wake-up, say it for it
     gate = civ("gate")
@@ -258,16 +265,25 @@ def handle(cfg, d, st, events, chat, reasons):
     log += ["- " + t.get("text", "") for t in lines_since(thoughts_path, th_pos)] or ["- (none)"]
     log += ["", "**Commands:**", ""]
     log += ["- `civ %s`" % c.get("cmd", "") for c in agent_cmds] or ["- (none)"]
+    if error:
+        log += ["", "**FAILED:** " + error]
     log += ["", "**Final words:**", "", out[-3000:], "",
             "_%.0f s, prompt ~%d tokens%s_" % (secs, len(prompt) // 4, ", ready said by the loop" if forced else "")]
     name = "T%s-%s.md" % (str(turn).zfill(3), time.strftime("%H%M%S"))
     open(os.path.join(d, "wakes", name), "w").write("\n".join(log))
     with open(os.path.join(d, "wake_stats.jsonl"), "a") as f:
         f.write(json.dumps(dict(meta, wake=st["wakes"], turn=turn, file=name, seconds=round(secs, 1), reasons=reasons,
-                                forced_ready=forced, wall=time.strftime("%Y-%m-%d %H:%M:%S")), ensure_ascii=False) + "\n")
+                                forced_ready=forced, error=error, wall=time.strftime("%Y-%m-%d %H:%M:%S")),
+                           ensure_ascii=False) + "\n")
     snapshot_memory(d, "wake %d, turn %s" % (st["wakes"], turn))
-    print(time.strftime("%H:%M:%S"), "wake-up done:", "; ".join(reasons), "(%.0f s)%s" % (secs, " +forced ready" if forced else ""),
-          flush=True)
+    print(time.strftime("%H:%M:%S"), "wake-up FAILED: " + error if error else "wake-up done:", "; ".join(reasons),
+          "(%.0f s)%s" % (secs, " +forced ready" if forced else ""), flush=True)
+    return error
+
+
+def notice(text):
+    # a line on the human's screen from CIVAI itself (not from the leader), so a silent leader is explained
+    civ("raw", "notice", json.dumps({"text": text}))
 
 
 def snapshot_memory(d, message):
@@ -303,6 +319,7 @@ def main():
     gid, d = game_dir()
     st = load_state(d)
     print("CIVAI loop on game %s (agent: %s)" % (gid, cfg["agent"][0]), flush=True)
+    failures = 0
     while True:
         events, epos = read_from(EVENTS, st["events_pos"])
         reasons = reasons_of(events)
@@ -317,7 +334,19 @@ def main():
         if dry:
             print(prompt_for(d, events, chat, reasons or ["(dry run)"]))
             return
-        handle(cfg, d, st, events, chat, reasons or ["manual run"])
+        error = handle(cfg, d, st, events, chat, reasons or ["manual run"])
+        if error and not once:
+            # the agent never got to play (usage limit, network, crash): keep these events for the next try,
+            # say so on screen once, and wait longer each time; the turn itself was already released
+            failures += 1
+            if failures == 1:
+                notice("the AI leader could not play this wake-up (%s). The game goes on; the leader catches up "
+                       "when the AI is reachable again." % error.splitlines()[0][:120])
+            time.sleep(min(60 * 2 ** (failures - 1), 900))
+            continue
+        if failures:
+            notice("the AI leader is playing again.")
+            failures = 0
         st["events_pos"], st["chat_pos"] = epos, cpos
         save_state(d, st)
         if once:

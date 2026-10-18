@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 60
+BRIDGE_VERSION = 61
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1302,6 +1302,16 @@ def cmdSay(args):
 	writeChat("claude", text)
 	return {"shown": True}
 
+
+def cmdNotice(args):
+	# a line from CIVAI itself (not from the leader): the loop explains a silent leader this way
+	line = u"<color=160,160,160,255>[CIVAI] %s</color>" % args["text"]
+	for i in range(gc.getMAX_CIV_PLAYERS()):
+		if gc.getPlayer(i).isAlive() and gc.getPlayer(i).isHuman():
+			CyInterface().addMessage(i, True, gc.getEVENT_MESSAGE_TIME() * 3, line, "",
+				InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
+	writeEvent("civai_notice", {"text": args["text"]})
+	return {"shown": True}
 
 
 # ------------------------------------------------------------------ area map
@@ -3858,6 +3868,7 @@ COMMANDS = {
 	"claim": cmdClaim,
 	"release": cmdRelease,
 	"say": cmdSay,
+	"notice": cmdNotice,
 	"exec": cmdExec,
 	"move": cmdMove,
 	"research": cmdResearch,
