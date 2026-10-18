@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 69
+BRIDGE_VERSION = 70
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -871,6 +871,21 @@ def pname(i):
 		return p.getName() + " (" + p.getCivilizationShortDescription(0) + ")"
 	return "an unknown civilization"
 
+def readEventTail(kind, names):
+	# is the same first contact already among this seat's last events?
+	try:
+		f = open(EVENTS_FILE, "rb")
+		try:
+			tail = f.readlines()[-20:]
+		finally:
+			f.close()
+	except:
+		return False
+	for line in tail:
+		if ('"%s"' % kind) in line and fromJson(line).get("with") == names:
+			return True
+	return False
+
 def writeEvent(kind, d):
 	if not d.has_key("turn"):
 		d["turn"] = gc.getGame().getGameTurn()
@@ -938,8 +953,11 @@ def recordEvent(tag, a):
 		other = a[1]
 		if other == iTeam:
 			other = a[0]
-		names = [pname(i) for i in range(gc.getMAX_CIV_PLAYERS())
-			if gc.getPlayer(i).isAlive() and gc.getPlayer(i).getTeam() == other]
+		# the game reports a contact before it marks the teams as met, so name them directly (they've just met)
+		names = ["%s (%s)" % (gc.getPlayer(i).getName(), gc.getPlayer(i).getCivilizationShortDescription(0))
+			for i in range(gc.getMAX_CIV_PLAYERS()) if gc.getPlayer(i).isAlive() and gc.getPlayer(i).getTeam() == other]
+		if names and readEventTail("first_contact", names):
+			return   # reported twice (each side meets the other)
 		writeEvent("first_contact", {"with": names})
 	elif tag == "cityBuilt":
 		c = a[0]
