@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 163
+BRIDGE_VERSION = 164
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -2510,6 +2510,13 @@ def cmdDo(args):
 		alone(u, args)
 	g = u.getGroup()
 	m, c, au = a.getMissionType(), a.getCommandType(), a.getAutomateType()
+	discovery = None
+	if name == "DISCOVER":
+		# a great person's discovery is research toward one tech (the game picks it), not always a whole tech
+		dt = u.getDiscoveryTech()
+		if dt >= 0:
+			team = gc.getTeam(u.getTeam())
+			discovery = (dt, u.getDiscoverResearch(dt), team.getResearchProgress(dt), team.getResearchCost(dt))
 	if name == "LEAD":
 		# without a unit the game opens a "which unit?" window that only a human's screen shows
 		promo = gc.getUnitInfo(u.getUnitType()).getLeaderPromotion()
@@ -2566,8 +2573,15 @@ def cmdDo(args):
 			del c2[u.getID()]
 			saveClaims(c2)
 		g.setAutomateType(AutomateTypes(au))
-	if u.isNone():
-		return {"id": args["id"], "done": name, "unit": "gone (used up, e.g. founded a city)"}
+	if u.isNone() or u.plot().isNone():
+		r = {"id": args["id"], "done": name, "unit": "gone (used up by the order)"}
+		if discovery:
+			dt, beakers, before, cost = discovery
+			team = gc.getTeam(gc.getPlayer(getClaudePlayer()).getTeam())
+			r["research"] = team.isHasTech(dt) and ("%s learned" % gc.getTechInfo(dt).getDescription()) or (
+				"%d research put into %s (now %d of %d; the rest comes from normal research)" % (
+				beakers, gc.getTechInfo(dt).getDescription(), team.getResearchProgress(dt), cost))
+		return r
 	r = {"id": u.getID(), "done": name, "at": (u.getX(), u.getY()), "moves_left": u.movesLeft() / gc.getMOVE_DENOMINATOR()}
 	if g.getLengthMissionQueue():
 		r["orders_queued"] = g.getLengthMissionQueue()
