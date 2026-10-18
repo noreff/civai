@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 138
+BRIDGE_VERSION = 141
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1186,6 +1186,7 @@ def cameraTo(x, y, prio):
 		return
 	CyCamera().JustLookAtPlot(plot)
 	g_camera["at"], g_camera["prio"], g_camera["turn_news"] = now, prio, True
+	pushIn(plot, EVENT_HOLD)
 
 def cameraHold(x, y):
 	# a shot chosen from outside (the studio): the camera goes there and the cameraman leaves it a while
@@ -1193,6 +1194,7 @@ def cameraHold(x, y):
 	if not plot.isNone():
 		CyCamera().JustLookAtPlot(plot)
 		g_camera["at"] = camClock()
+		pushIn(plot, EVENT_HOLD)
 
 SHOT_SECONDS = 9        # one shot of the cameraman
 EVENT_HOLD = 12         # an event's shot (a battle, a city taken) is held this long before the cameraman moves on
@@ -1205,6 +1207,8 @@ def cameraman():
 	if not spectating():
 		return
 	now = camClock()
+	if cameraMoving(now):
+		return
 	if now - g_camera["at"] < EVENT_HOLD or now < g_camera.get("until", 0):
 		return
 	import random
@@ -1221,10 +1225,43 @@ def cameraman():
 		return
 	x, y, zoom, pitch = shot
 	cam = CyCamera()
-	cam.JustLookAtPlot(gc.getMap().plot(x, y))
+	plot = gc.getMap().plot(x, y)
+	cam.JustLookAtPlot(plot)
 	cam.SetBasePitch(pitch)
 	cam.SetZoom(zoom)
 	g_camera["until"] = now + SHOT_SECONDS
+	# a shot never stands still: the camera drifts a tile or two across it and pushes in a little
+	dx, dy = random.choice(((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)))
+	glide(plot, gc.getMap().plot(x + 2 * dx, y + 2 * dy), zoom, zoom * 0.85, SHOT_SECONDS)
+
+def glide(a, b, z0, z1, seconds):
+	if a.isNone():
+		return
+	if b.isNone():
+		b = a
+	p, q = a.getPoint(), b.getPoint()
+	g_camera["move"] = {"a": (p.x, p.y, p.z), "b": (q.x, q.y, q.z), "z": (z0, z1), "t0": camClock(), "dur": float(seconds)}
+
+def pushIn(plot, seconds):
+	# an event's shot holds on the place and slowly pushes in
+	z = CyCamera().GetZoom()
+	glide(plot, plot, z, z * 0.85, seconds)
+
+def cameraMoving(now):
+	# from every poll (about 25 a second): the next small step of the current shot's drift
+	m = g_camera.get("move")
+	if not m:
+		return False
+	t = (now - m["t0"]) / m["dur"]
+	if t >= 1.0 or t < 0:
+		g_camera["move"] = None
+		return False
+	e = t * t * (3 - 2 * t)   # ease in and out
+	a, b = m["a"], m["b"]
+	cam = CyCamera()
+	cam.JustLookAt(NiPoint3(a[0] + (b[0] - a[0]) * e, a[1] + (b[1] - a[1]) * e, a[2] + (b[2] - a[2]) * e))
+	cam.SetZoom(m["z"][0] + (m["z"][1] - m["z"][0]) * e)
+	return True
 
 def pickShot(kind, random):
 	seats = [i for i in agentPlayers() if gc.getPlayer(i).isAlive()]
@@ -1707,14 +1744,51 @@ def deliverChat(frm, text, to):
 	# the screen (a human player, or the spectator whose screen is filmed) shows every line: the video sees all
 	# channels. The speaker in his civ's colour; a private line says to whom and that it is private
 	head = to is None and u"%s to all" % colored(frm, shown(frm)) or \
-		u"%s \u2192 %s  <color=170,170,170,255>(private)</color>" % (colored(frm, shown(frm)), colored(to, shown(to)))
-	screens = humanPlayers()
-	if spectating() and gc.getGame().getActivePlayer() not in screens:
-		screens.append(gc.getGame().getActivePlayer())
+		u"%s to %s  <color=170,170,170,255>(private)</color>" % (colored(frm, shown(frm)), colored(to, shown(to)))
 	line = u"<font=4>%s:  <color=255,235,180,255>%s</color></font>" % (head, text)   # the message panel wraps it
-	for i in screens:
+	for i in humanPlayers():
 		CyInterface().addMessage(i, True, gc.getEVENT_MESSAGE_TIME() * 4, line, "",
 			InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
+	if spectating():
+		chatShow(head, text)
+
+# The filmed screen's chat: the game's own message panel grows over the middle of the map and, under Wine,
+# keeps its lines for minutes (its clock moves in 128 s steps). So the spectator gets the bridge's own panel at
+# the left edge: the last few lines, each for a while by the camera's clock; a long one is cut short (the
+# full text is in chat_all.jsonl for the edit)
+CHAT_LINES, CHAT_SECONDS, CHAT_CHARS = 3, 25, 220
+g_chat = {"lines": [], "shown": None}
+
+def chatShow(head, text):
+	if len(text) > CHAT_CHARS:
+		text = text[:CHAT_CHARS].rsplit(" ", 1)[0] + u"\u2026"
+	g_chat["lines"] = (g_chat["lines"] + [(camClock(), head, text)])[-CHAT_LINES:]
+
+def chatPanel():
+	import CvScreenEnums
+	now = camClock()
+	g_chat["lines"] = [l for l in g_chat["lines"] if now - l[0] < CHAT_SECONDS]
+	key = tuple([l[0] for l in g_chat["lines"]])
+	if key == g_chat["shown"]:
+		return
+	g_chat["shown"] = key
+	sc = CyGInterfaceScreen("MainInterface", CvScreenEnums.MAIN_INTERFACE)
+	sc.deleteWidget("CIVAIChatBG")
+	sc.deleteWidget("CIVAIChat")
+	if not g_chat["lines"]:
+		return
+	W, H = sc.getXResolution(), sc.getYResolution()
+	w = int(W * 0.34)
+	per = w / 10   # characters per line at the chat's font, about
+	rows = 0
+	for t, head, text in g_chat["lines"]:
+		rows = rows + 1 + (len(re.sub("<[^>]*>", "", head)) + len(text) + 3) / per
+	h = min(int(H * 0.6), rows * 26 + 24)
+	x, y = 12, int(H * 0.86) - h
+	body = u"\n".join([u"<font=4>%s:  <color=255,235,180,255>%s</color></font>" % (head, text)
+		for t, head, text in g_chat["lines"]])
+	sc.addPanel("CIVAIChatBG", u"", u"", True, False, x, y, w + 16, h, PanelStyles.PANEL_STYLE_MAIN_BLACK50)
+	sc.addMultilineText("CIVAIChat", body, x + 8, y + 8, w, h - 8, WidgetTypes.WIDGET_GENERAL, -1, -1, 1 << 0)
 
 def colored(i, text):
 	# a leader's name in his civ's colour, as the game's own score list shows it
@@ -5296,6 +5370,12 @@ def poll():
 				spectatorView()
 			except:
 				log("spectator view FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
+			try:
+				if spectating():
+					chatPanel()
+			except:
+				g_chat["lines"] = []
+				log("chat panel FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 			try:
 				cameraman()
 			except:

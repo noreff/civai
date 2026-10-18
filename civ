@@ -698,6 +698,18 @@ def main(argv):
             print(fmt_record(call("release", {"id": argv[1] if argv[1] == "all" else int(argv[1])})))
         elif cmd == "say":
             flag = [f for f in ("--aim", "--think") if f in argv[:-1]]
+            rest = list(argv[1:])
+            for f in flag[:1] + ["--to"]:
+                if f in rest[:-1]:
+                    j = rest.index(f)
+                    del rest[j:j + 2]
+            rest = [a for a in rest if a != "--popup"]
+            if len(rest) != 1:
+                # unquoted words can't be told apart: the aim's tail would go out as the message (and be read)
+                print('ERROR: nothing was sent. The aim and the message must each be one quoted argument, and so must a '
+                      'leader name of several words: civ say [--to "Leader"] --aim "what it is for" "message". '
+                      'This call had %d pieces after the options.' % len(rest), file=sys.stderr)
+                return 1
             if flag:
                 # the aim and the message in one call: `civ say [--to X] --aim "what this message is for" "message"`
                 i = argv.index(flag[0])
