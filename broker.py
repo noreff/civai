@@ -101,9 +101,33 @@ def serve(game):
                 reply = {"out": "", "err": "ERROR: %s\n" % e, "code": 1}
             conn.sendall(json.dumps(reply).encode() + b"\n")
 
+    threading.Thread(target=keep_saves, args=(game,), daemon=True).start()
     while True:
         conn, _ = srv.accept()
         threading.Thread(target=handle, args=(conn,), daemon=True).start()
+
+
+AUTOSAVES = os.path.expanduser("~/Library/Application Support/CrossOver/Bottles/%s/drive_c/users/crossover/Documents/"
+                               "My Games/Beyond the Sword/Saves/single/auto" % os.environ.get("CIV_BOTTLE", "civ4"))
+
+
+def keep_saves(game):
+    # the game keeps only its last few autosaves: copy each one into the game's folder as it appears,
+    # so every turn can be loaded again later (replays, re-recording the map for the video)
+    import shutil
+    import time
+    dest = os.path.join(HERE, "games", game, "saves")
+    os.makedirs(dest, exist_ok=True)
+    while True:
+        try:
+            for name in os.listdir(AUTOSAVES):
+                src, dst = os.path.join(AUTOSAVES, name), os.path.join(dest, name)
+                if name.endswith(".CivBeyondSwordSave") and time.time() - os.path.getmtime(src) > 5 and (
+                        not os.path.exists(dst) or os.path.getmtime(src) > os.path.getmtime(dst)):
+                    shutil.copy2(src, dst)
+        except OSError:
+            pass
+        time.sleep(10)
 
 
 def client(argv):
