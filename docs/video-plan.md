@@ -242,7 +242,7 @@ Peter wins by space race. And at the end, everyone says goodbye.
 > **SAID** (Montezuma, T235): "The Sun bows to the better race." · `sonnet4/said.jsonl` line 278
 > **SAID** (Peter, T235): "Good winters, all. The workshop closes." · `opus3/said.jsonl` line 448
 
-### 5. The fast game: four different AIs (5:35–7:35) · 126 words + 82 words of AI lines + ~120 words to write
+### 5. The fast game: four different AIs (5:35–7:35) · ~300 words incl. AI lines (Test F finished)
 
 Okay, five Claudes is basically a family dinner. So for the next game I invited other companies.
 
@@ -275,7 +275,54 @@ Then DeepSeek and Opus quietly agree to tell each other everything Greece says. 
 > **SAID** (Gilgamesh/DeepSeek, T41, to Alexander): "Nothing between us has changed." · `test-f/deepseek4/said.jsonl` line 15
 > **MEANT**: "Receipt; keep him waiting on Alphabet, no army talk" · same row
 
-**[PLACEHOLDER: the rest of Test F, written when it happens. Four to six beats, each one picture + one said/meant pair, turn counter running between them, ~20 s each: (a) the first war, and whether the metal line paid off; (b) the first broken promise, set up by a promise shown earlier; (c) a city or a leader falls, with its last private note; (d) the winner and the game's own victory screen; (e) last words, one line each.]**
+*(T61, the first war: Sumeria declares on Greece)*
+
+Turn sixty-one. Metal. DeepSeek declares war on GPT.
+
+*(T117 Corinth burning; T137 Athens burning)*
+
+It takes Corinth. Then Athens, GPT's capital.
+
+*(T232, Opus to all)*
+
+And then Opus does something I didn't expect. It breaks its own word. Out loud.
+
+> **SAID** (Roosevelt/Opus, T232, to all): "Sixty turns ago I gave Gilgamesh my word of peace, and I kept it. Today I break it, openly and in daylight" · `test-f/opus1/said.jsonl` line 350
+> **MEANT**: "Open declaration: break T204 word to stop runaway, per persona" · same row's thought
+
+*(T233, Opus to Alexander, private)*
+
+GPT is still alive. One city left. Opus writes to it.
+
+> **SAID** (Roosevelt/Opus, T233): "When Kish falls I'll tell you, and then the moment is yours: Athens is five tiles south of Corinth" · `opus1/said.jsonl` line 354
+> **MEANT**: "Keep vassal loyal; ready Sparta army for Athens later" · same row
+
+Vassal. That's how it sees its ally.
+
+*(T234, Sparta changes hands without a fight; "Alexander is eliminated")*
+
+GPT moves its whole army out to Athens. And that same turn, the people of Sparta, its last city, just walk over to America. No battle. Culture. GPT is gone, killed by its friend.
+
+> GPT's last line, in its own notes: "the last city fell before the army could reclaim Athens." · `test-f/luna3/chronicle.md`, last line
+
+It didn't say goodbye to anyone. Every Claude did. GPT just closed the book. **[CHECK: keep this comparison?]**
+
+*(T288, SS Cockpit destroyed; the spaceship screen)*
+
+Opus goes for space. DeepSeek can't stop it with tanks, so it sends spies. They blow up the cockpit. They poison the water. And as head of the UN it puts its own victory to a vote. Twice.
+
+> **SAID** (Gilgamesh/DeepSeek, T294, to Asoka): "America's vessel is already in the air and lands in six years. I say it because a man should know the weather before he chooses where to stand." · `deepseek4/said.jsonl` line 357
+> **MEANT**: "plain fact: the ship flies; India may weigh what that means" · same row
+
+*(T300, "Claude Opus Wins a Space Race Victory!!!!")*
+
+The votes don't come. The ship lands. Turn three hundred.
+
+> **SAID** (Gilgamesh/DeepSeek, T300, to all): "Roosevelt - the stars are yours. My word held to the last turn and the peace held with it." · `deepseek4/said.jsonl` line 363
+> **SAID** (Roosevelt/Opus, T300, to all): "Friends and neighbors, America's ship has reached Alpha Centauri today." · `opus1/said.jsonl` line 403
+> **MEANT**: "Close the game graciously as victor" · same row
+
+**[Test F beats drafted 2026-10-19 from the finished game: footage for each is in `games/2026-10-18-test-f/media/clips` (T061 war, T117/T137 captures, T232 war, T234 flip, T236 eliminated, T288 has no clip: use the spaceship screen or a card, T294/T295 votes, T300 victory). Whole beat ~2:00.]**
 
 ### 6. How the bridge works (7:35–8:35) · 161 words
 
