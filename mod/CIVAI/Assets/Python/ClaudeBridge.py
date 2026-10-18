@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 84
+BRIDGE_VERSION = 85
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3969,6 +3969,69 @@ def findItem(want):
 	near = suggest(want, gc.getNumUnitInfos(), gc.getUnitInfo) or suggest(want, gc.getNumBuildingInfos(), gc.getBuildingInfo)
 	raise Exception("nothing called %s to build.%s" % (want, near))
 
+def cityAndRest(words):
+	# "Addis Ababa 12 7": the longest start of the words that names a known city is the city, the rest follows
+	for k in range(len(words), 0, -1):
+		try:
+			return findCity({"name": " ".join(words[:k])}), words[k:]
+		except:
+			continue
+	raise Exception("no known city named %s" % " ".join(words[:2]))
+
+def workView(c):
+	# the city screen's citizens: worked tiles and their yields, free tiles it could work, specialists
+	Y = (YieldTypes.YIELD_FOOD, YieldTypes.YIELD_PRODUCTION, YieldTypes.YIELD_COMMERCE)
+	fmt = lambda pl: "%d,%d %d/%d/%d" % (pl.getX(), pl.getY(), pl.getYield(Y[0]), pl.getYield(Y[1]), pl.getYield(Y[2]))
+	worked, free = [], []
+	for i in range(1, gc.getNUM_CITY_PLOTS()):
+		pl = c.getCityIndexPlot(i)
+		if pl is None or pl.isNone():
+			continue
+		if c.isWorkingPlotByIndex(i):
+			worked.append(fmt(pl))
+		elif c.canWork(pl):
+			free.append((pl.getYield(Y[0]) * 3 + pl.getYield(Y[1]) * 2 + pl.getYield(Y[2]), fmt(pl)))
+	free.sort()
+	free.reverse()
+	specs = ["%s %d" % (gc.getSpecialistInfo(s).getDescription(), c.getSpecialistCount(s))
+		for s in range(gc.getNumSpecialistInfos()) if c.getSpecialistCount(s) > 0]
+	return {"city": c.getName(), "per_turn": "food %d (needs %d), production %d, commerce %d" % (
+			c.getYieldRate(Y[0]), c.foodConsumption(False, 0), c.getYieldRate(Y[1]), c.getYieldRate(Y[2])),
+		"worked (x,y food/production/commerce)": ", ".join(worked) or "none",
+		"could work instead": ", ".join([f for (v, f) in free[:8]]) or "none",
+		"specialists": ", ".join(specs) or "none",
+		"citizens": c.isCitizensAutomated() and "placed by the governor" or "placed by you"}
+
+def cmdWork(args):
+	# a human's clicks on the city screen: which tiles the citizens work, and specialists
+	iMe, iTeam = myIds()
+	c, rest = cityAndRest(args["words"])
+	if c.getOwner() != iMe:
+		raise Exception("%s is not our city" % c.getName())
+	if not rest:
+		return workView(c)
+	if rest[0].lower() == "auto":
+		c.alterWorkingPlot(0)   # the city tile: the governor places the citizens again
+		return workView(c)
+	if len(rest) >= 2 and rest[0].lstrip("-").isdigit() and rest[1].lstrip("-").isdigit():
+		pl = CyMap().plot(int(rest[0]), int(rest[1]))
+		i = c.getCityPlotIndex(pl)
+		if i < 1 or i >= gc.getNUM_CITY_PLOTS():
+			raise Exception("%s,%s is not one of %s's tiles" % (rest[0], rest[1], c.getName()))
+		if not c.canWork(pl) and not c.isWorkingPlotByIndex(i):
+			raise Exception("%s can't work %s,%s (another city works it, it's foreign, or not yet in its borders)" % (c.getName(), rest[0], rest[1]))
+		c.alterWorkingPlot(i)   # worked -> freed (the citizen becomes a specialist); free -> worked
+		return workView(c)
+	s = findInfo(rest[0], gc.getNumSpecialistInfos(), gc.getSpecialistInfo, "specialist_")
+	if s < 0:
+		raise Exception("say X Y (a tile), a specialist (%s) with +N/-N, or auto" % ", ".join(
+			[gc.getSpecialistInfo(k).getDescription() for k in range(gc.getNumSpecialistInfos())]))
+	n = len(rest) > 1 and int(rest[1]) or 1
+	if n > 0 and not c.isSpecialistValid(s, n):
+		raise Exception("%s can't take %d more %s (needs a building that allows them, or a free citizen)" % (c.getName(), n, gc.getSpecialistInfo(s).getDescription()))
+	c.alterSpecialistCount(s, n)
+	return workView(c)
+
 def cmdBuild(args):
 	# what a city of ours builds: replace the current item (default), queue=true to add at the end,
 	# first=true to put it in front; check=true only tells whether it is possible
@@ -4406,6 +4469,7 @@ COMMANDS = {
 	"raze": cmdRaze,
 	"do": cmdDo,
 	"build": cmdBuild,
+	"work": cmdWork,
 	"hurry": cmdHurry,
 	"ping": cmdPing,
 	"status": cmdStatus,
