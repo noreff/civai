@@ -58,8 +58,19 @@ def nice(s, prefix):
     return s.replace(prefix, "").replace("_", " ").lower() if s else None
 
 
+UU_PREFIXES = ("native american", "holy roman", "american", "arabian", "aztec", "babylonian", "byzantine", "carthaginian",
+               "celtic", "chinese", "dutch", "egyptian", "english", "ethiopian", "french", "german", "greek", "incan",
+               "indian", "japanese", "khmer", "korean", "mali", "mayan", "mongol", "ottoman", "persian", "portuguese",
+               "roman", "russian", "spanish", "sumerian", "viking", "zulu")
+
+
 def unit_name(t):
-    return nice(t, "UNIT_").replace("mongol ", "").replace("indian ", "").title()
+    n = nice(t, "UNIT_")
+    for civ in UU_PREFIXES:   # unique units carry their civ's name: UNIT_MONGOL_KESHIK -> Keshik
+        if n.startswith(civ + " ") and len(n) > len(civ) + 1:
+            n = n[len(civ) + 1:]
+            break
+    return n.title()
 
 
 def at_war(o):
@@ -74,7 +85,9 @@ def owner_name(o, short=False):
     p = PLAYERS.get(o)
     if not p:
         return "?"
-    civ = {"Vikings": "Viking", "Zululand": "Zulu", "Ottomans": "Ottoman", "Barbarians": "Barbarian"}.get(p["civ"], p["civ"])
+    civ = {"Zululand": "Zulu", "Holy Rome": "Holy Roman"}.get(p["civ"], p["civ"])
+    if civ.endswith("s") and not civ.endswith("ss"):
+        civ = civ[:-1]   # Vikings -> Viking, Ottomans -> Ottoman
     if short:
         return civ
     return civ + (", AT WAR" if at_war(o) else "")

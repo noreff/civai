@@ -82,11 +82,13 @@ _human = []
 
 def human_name():
     # the human leader's name, as the game shows it ("V (India)"), so the brief never says "the human"
-    if not _human:
+    gid = os.path.basename(game_dir()[1])
+    if not _human or _human[0][0] != gid:   # per game: a new game has a new human leader
         m = re.search(r"^  (.+?) of (.+?) \[HUMAN\]", civ("status"), re.M)
         if m:
-            _human.append("%s (%s)" % (m.group(1), m.group(2)))
-    return _human[0] if _human else "the human leader"
+            del _human[:]
+            _human.append((gid, "%s (%s)" % (m.group(1), m.group(2))))
+    return _human[0][1] if _human else "the human leader"
 
 
 def fmt_event(e):
