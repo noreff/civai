@@ -32,6 +32,10 @@
                            demand may mean war; requests (convert, switch civic, join a war,
                            stop trading) take effect on yes
   civ tradeable <player>   what each side can trade right now (the game's trade screen)
+  civ relations            the Foreign Advisor view of the leaders we've met: wars, treaties, vassals,
+                           how each AI feels about the others, its worst enemy, state religions
+  civ victory              the Victory screen: scores of the leaders we've met, our progress toward each
+                           way to win (domination, culture, conquest, diplomacy, space, time)
   civ rules <name>         the game's rules for a tech, unit, building, civic, worker build
                            or resource (cost, requirements, what it unlocks, strategy text),
                            or a Civilopedia article on how the game works (war, borders,
@@ -464,6 +468,10 @@ def main(argv):
             if len(argv) < 3:
                 raise SystemExit("civ answer N yes|no")
             print(fmt_record(call("answer", {"id": argv[1], "answer": argv[2]})))
+        elif cmd == "victory":
+            print(fmt_record(call("victory", {})))
+        elif cmd == "relations":
+            print(fmt_record(call("relations", {})))
         elif cmd == "tradeable":
             print(fmt_record(call("tradeable", {"player": argv[1]})))
         elif cmd == "rules":

@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 57
+BRIDGE_VERSION = 59
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3137,6 +3137,93 @@ def cmdWar(args):
 	return {"war_declared_on": gc.getTeam(other).getName(), "deals_ended": deals, "units_pushed_out": moved}
 
 
+def cmdRelations(args):
+	# what a human sees on the Foreign Advisor screen, for the leaders we have met: wars, treaties,
+	# vassals, each AI's mood toward every other met leader, and its worst enemy
+	iMe, iTeam = myIds()
+	me = gc.getTeam(iTeam)
+	met = [i for i in range(gc.getMAX_CIV_PLAYERS()) if gc.getPlayer(i).isAlive() and i != iMe
+		and me.isHasMet(gc.getPlayer(i).getTeam())]
+	everyone = [iMe] + met
+	out = {}
+	for a in everyone:
+		pa = gc.getPlayer(a)
+		ta = gc.getTeam(pa.getTeam())
+		line = []
+		wars = [pname(b) for b in everyone if b != a and ta.isAtWar(gc.getPlayer(b).getTeam())]
+		if wars:
+			line.append("at war with " + ", ".join(wars))
+		for what, test in (("open borders", ta.isOpenBorders), ("defensive pact", ta.isDefensivePact)):
+			x = [pname(b) for b in everyone if b != a and test(gc.getPlayer(b).getTeam())]
+			if x:
+				line.append("%s with %s" % (what, ", ".join(x)))
+		masters = [pname(b) for b in everyone if b != a and ta.isVassal(gc.getPlayer(b).getTeam())]
+		if masters:
+			line.append("vassal of " + ", ".join(masters))
+		if not pa.isHuman() and not pa.isClaude():
+			moods = ["%s %s" % (pname(b), gc.getAttitudeInfo(pa.AI_getAttitude(b)).getDescription().lower())
+				for b in everyone if b != a]
+			line.append("feels: " + "; ".join(moods))
+			worst = pa.getWorstEnemyName()
+			if worst:
+				line.append("worst enemy: %s" % worst)
+		state = pa.getStateReligion()
+		if state >= 0:
+			line.append("state religion " + gc.getReligionInfo(state).getDescription())
+		out[pname(a)] = "; ".join(line) or "at peace with everyone we know"
+	return out
+
+def cmdVictory(args):
+	# the Victory screen: scores of the leaders we've met, and how far we are from each way to win
+	iMe, iTeam = myIds()
+	g = gc.getGame()
+	me = gc.getPlayer(iMe)
+	team = gc.getTeam(iTeam)
+	scores = []
+	for i in range(gc.getMAX_CIV_PLAYERS()):
+		p = gc.getPlayer(i)
+		if p.isAlive() and (i == iMe or team.isHasMet(p.getTeam())):
+			scores.append((g.getPlayerScore(i), pname(i)))
+	scores.sort()
+	scores.reverse()
+	r = {"turn": "%d of %d" % (g.getGameTurn(), g.getMaxTurns() or g.getEstimateEndTurn()),
+		"scores": ", ".join(["%s %d" % (n, sc) for sc, n in scores])}
+	land = CyMap().getLandPlots()
+	for v in range(gc.getNumVictoryInfos()):
+		if not g.isVictoryValid(v):
+			continue
+		info = gc.getVictoryInfo(v)
+		t = info.getType()
+		if info.getLandPercent() > 0:
+			r["domination"] = "we hold %d%% of the land (need %d%%) and %d%% of all people (need %d points more than the next civ)" % (
+				100 * team.getTotalLand() / max(1, land), info.getLandPercent(),
+				100 * team.getTotalPopulation() / max(1, g.getTotalPopulation()), info.getPopulationPercentLead())
+		elif info.getCityCulture() > 0:
+			need = info.getNumCultureCities()
+			cities = []
+			(c, it) = me.firstCity(False)
+			while c and not c.isNone():
+				cities.append((c.getCulture(iMe), c.getName()))
+				(c, it) = me.nextCity(it, False)
+			cities.sort()
+			cities.reverse()
+			goal = gc.getCultureLevelInfo(info.getCityCulture()).getSpeedThreshold(g.getGameSpeedType())
+			r["culture"] = "%d cities need %d culture each; our best: %s" % (need, goal,
+				", ".join(["%s %d" % (n, cu) for cu, n in cities[:need]]))
+		elif info.isConquest():
+			r["conquest"] = "eliminate every rival"
+		elif info.isDiploVote():
+			r["diplomatic"] = "win a victory vote in the UN or the Apostolic Palace (see `civ relations` for who backs whom)"
+		elif t.find("SPACE") >= 0:
+			r["space"] = "build and launch the spaceship (Apollo Program first)"
+		elif info.isEndScore():
+			r["time"] = "at the last turn (%d) the highest score wins" % (g.getMaxTurns() or g.getEstimateEndTurn())
+		elif info.isTargetScore():
+			r["score"] = "the first to reach the target score wins"
+		else:
+			r[t.replace("VICTORY_", "").lower()] = info.getDescription()
+	return r
+
 def cmdTradeable(args):
 	# what each side could put on the table right now -- the same as the game's trade screen
 	iMe, iTeam = myIds()
@@ -3770,6 +3857,8 @@ COMMANDS = {
 	"proposals": cmdProposals,
 	"answer": cmdAnswer,
 	"tradeable": cmdTradeable,
+	"relations": cmdRelations,
+	"victory": cmdVictory,
 	"religion": cmdReligion,
 	"civics": cmdCivics,
 	"rules": cmdRules,
