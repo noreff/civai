@@ -878,7 +878,8 @@ def handle(cfg, d, st, events, chat, reasons):
     # the human must never be stuck: if the agent forgot `civ ready` on a turn wake-up, say it for it
     gate = civ("gate")
     forced = False
-    if ("claude_wake" in " ".join(reasons) or "player_waiting" in " ".join(reasons)) and "ready:           no" in gate:
+    if (any(r.startswith(("turn ", "player_waiting")) for r in reasons) or "claude_wake" in " ".join(reasons)) \
+            and "ready:           no" in gate and not error:
         civ("ready")
         forced = True
     st["wakes"] = st.get("wakes", 0) + 1
