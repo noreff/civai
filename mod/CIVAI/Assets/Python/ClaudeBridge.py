@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 54
+BRIDGE_VERSION = 55
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1026,6 +1026,8 @@ def isKeyUnit(info):
 	for k in range(gc.getNumCorporationInfos()):
 		if info.getCorporationSpreads(k) > 0:
 			return True
+	if info.isSpy() or info.getNukeRange() >= 0:
+		return True   # spy missions and nukes are a ruler's decisions, not the automation's
 	return False
 
 def claimKeyUnit(u):
