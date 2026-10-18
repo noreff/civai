@@ -303,6 +303,7 @@ def say_argv(text, said):
             to = text[len("say --to "):cut]
         else:
             to = (said.get("to") or "").split(" (")[0]   # "Joao II (Portugal)" as the bridge wrote it
+        to = re.split(r" --(?:aim|think) ", to)[0]   # the private note before the message isn't part of the name
         argv += ["--to", to.strip()]
     return argv + [msg]
 
