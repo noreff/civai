@@ -22,11 +22,11 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-BRIDGE = os.path.expanduser("~/Library/Application Support/CrossOver/Bottles/civ4/drive_c/claude_bridge")
+BRIDGE = os.path.expanduser("~/Library/Application Support/CrossOver/Bottles/%s/drive_c/claude_bridge" % os.environ.get("CIV_BOTTLE", "civ4"))
 EVENTS = os.path.join(BRIDGE, "events.jsonl")
 CHAT = os.path.join(BRIDGE, "chat.jsonl")
 WAKE_KINDS = ("message_from_player", "claude_wake", "player_waiting", "deal_done", "deal_declined",
-              "deal_failed", "native_deal")
+              "deal_failed", "native_deal", "proposal")
 NOISE = ("auto_ready", "claude_ready", "my_turn_begins", "player_turn_begins", "combat_animal")
 MEMORY = ("persona.md", "ambitions.md", "plan.md", "secrets.md", "chronicle.md")
 CHAT_LINES = 30             # recent chat shown on every wake-up, new lines marked

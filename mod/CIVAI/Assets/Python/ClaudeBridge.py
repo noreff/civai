@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 45
+BRIDGE_VERSION = 46
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -791,6 +791,8 @@ def recordEvent(tag, a):
 		if a[1] == iMe:
 			snapCities(gc.getPlayer(iMe))
 			snapUnits(gc.getPlayer(iMe))
+			if engineControl():
+				expireProposals()
 			writeEvent("my_turn_begins", {})
 		elif gc.getPlayer(a[1]).isHuman():
 			# fired before the game turn counter moves on: the player is about to play turn a[0] + 1
@@ -853,11 +855,21 @@ def recordEvent(tag, a):
 			if war:
 				kind = "war_declared"
 			writeEvent(kind, {"team": gc.getTeam(t1).getName(), "against": gc.getTeam(t2).getName()})
+	elif tag == "claudeDiplomacy":
+		frm, to, comment, data, gives, wants = engineArgs(a)
+		if to == iMe:
+			newProposal(frm, commentName(comment), data, fromEngineText(gives), fromEngineText(wants))
+	elif tag == "claudeOffered":
+		frm, to, change, gives, wants = engineArgs(a)
+		if to == iMe:
+			newProposal(frm, "screen_offer", change, fromEngineText(gives), fromEngineText(wants))
+	elif tag == "cityHurry" and engineControl():
+		pass
 	elif tag == "cityHurry" and a[0].getOwner() == iMe and g_window[0] == ("own", iMe):
 		undoHurry(a[0], int(a[1]))
 	elif tag == "unitKilled" and a[0].getOwner() == iMe:
 		g_killed[a[0].getID()] = True   # a real death (combat, capture); the game reports it only then
-	elif tag == "unitLost" and a[0].getOwner() == iMe:
+	elif tag == "unitLost" and a[0].getOwner() == iMe and not engineControl():
 		unitGone(a[0])
 	elif tag == "greatPersonBorn" and a[1] == iMe:
 		writeEvent("great_person", {"unit": gc.getUnitInfo(a[0].getUnitType()).getType(), "city": a[2].getName(),
@@ -2249,11 +2261,37 @@ def parseItem(text):
 		return ("tech", i)
 	if kind == "gold":
 		return ("gold", int(arg))
-	if kind in ("open_borders", "defensive_pact", "peace"):
+	if kind in ("open_borders", "defensive_pact", "peace", "map", "permanent_alliance", "vassal", "surrender"):
 		return (kind, -1)
-	if kind in ("war", "peace_with"):
+	if kind in TEAM_ITEMS:
 		return (kind, findPlayer(arg))
-	raise Exception("unknown deal item %s (tech:<name>, gold:<n>, open_borders, defensive_pact, peace, war:<player>, peace_with:<player>)" % text)
+	if kind == "gold_per_turn":
+		return (kind, int(arg))
+	if kind == "resource":
+		i = findInfo(arg, gc.getNumBonusInfos(), gc.getBonusInfo, "bonus_")
+		if i < 0:
+			raise Exception("no resource called %s" % arg)
+		return (kind, i)
+	if kind == "civic":
+		i = findInfo(arg, gc.getNumCivicInfos(), gc.getCivicInfo, "civic_")
+		if i < 0:
+			raise Exception("no civic called %s" % arg)
+		return (kind, i)
+	if kind == "religion":
+		i = findInfo(arg, gc.getNumReligionInfos(), gc.getReligionInfo, "religion_")
+		if i < 0:
+			raise Exception("no religion called %s" % arg)
+		return (kind, i)
+	if kind == "city":
+		for i in range(gc.getMAX_CIV_PLAYERS()):
+			(c, it) = gc.getPlayer(i).firstCity(False)
+			while c and not c.isNone():
+				if c.getName().lower() == arg.strip():
+					return (kind, c.getID())
+				(c, it) = gc.getPlayer(i).nextCity(it, False)
+		raise Exception("no city called %s" % arg)
+	raise Exception("unknown deal item %s (tech:<name>, gold:<n>, gold_per_turn:<n>, resource:<name>, city:<name>, map, open_borders, "
+		"defensive_pact, permanent_alliance, peace, war:<player>, peace_with:<player>, embargo:<player>, civic:<name>, religion:<name>)" % text)
 
 def itemText(it):
 	kind, d = it
@@ -2265,19 +2303,70 @@ def itemText(it):
 		return "war on " + pname(d)
 	if kind == "peace_with":
 		return "peace with " + pname(d)
+	if kind == "embargo":
+		return "stop trading with " + pname(d)
+	if kind == "gold_per_turn":
+		return "%d gold per turn" % d
+	if kind == "resource":
+		return gc.getBonusInfo(d).getDescription()
+	if kind == "civic":
+		return "switch to " + gc.getCivicInfo(d).getDescription()
+	if kind == "religion":
+		return "convert to " + gc.getReligionInfo(d).getDescription()
+	if kind == "city":
+		for i in range(gc.getMAX_CIV_PLAYERS()):
+			c = gc.getPlayer(i).getCity(d)
+			if c and not c.isNone():
+				return "the city of " + c.getName()
+		return "a city"
+	if kind == "other":
+		return "a trade item of type %d" % d
 	return kind.replace("_", " ")
 
 TRADE_TYPES = {"tech": "TRADE_TECHNOLOGIES", "gold": "TRADE_GOLD", "open_borders": "TRADE_OPEN_BORDERS",
 	"defensive_pact": "TRADE_DEFENSIVE_PACT", "peace": "TRADE_PEACE_TREATY", "war": "TRADE_WAR",
-	"peace_with": "TRADE_PEACE"}
+	"peace_with": "TRADE_PEACE", "resource": "TRADE_RESOURCES", "city": "TRADE_CITIES",
+	"gold_per_turn": "TRADE_GOLD_PER_TURN", "map": "TRADE_MAPS", "vassal": "TRADE_VASSAL",
+	"surrender": "TRADE_SURRENDER", "permanent_alliance": "TRADE_PERMANENT_ALLIANCE",
+	"embargo": "TRADE_EMBARGO", "civic": "TRADE_CIVIC", "religion": "TRADE_RELIGION"}
+TEAM_ITEMS = ("war", "peace_with", "embargo")   # their data is a team in the game, a player here
+DATA_ITEMS = ("tech", "gold", "resource", "city", "gold_per_turn", "civic", "religion")
+
+def engineText(items):
+	# items as the CIVAI engine reads them: "item:data,..." (TradeableItems numbers)
+	out = []
+	for it in items:
+		t = tradeData(it)
+		out.append("%d:%d" % (int(t.ItemType), t.iData))
+	return ",".join(out)
+
+def fromEngineText(text):
+	kinds = {}
+	for k, name in TRADE_TYPES.items():
+		kinds[int(getattr(TradeableItems, name))] = k
+	out = []
+	for part in (text or "").split(","):
+		if ":" not in part:
+			continue
+		t, d = [int(x) for x in part.split(":")]
+		k = kinds.get(t)
+		if k is None:
+			out.append(("other", t))
+			continue
+		if k in TEAM_ITEMS:
+			d = gc.getTeam(d).getLeaderID()
+		elif k not in DATA_ITEMS:
+			d = -1
+		out.append((k, d))
+	return out
 
 def tradeData(it):
 	kind, d = it
 	t = TradeData()
 	t.ItemType = getattr(TradeableItems, TRADE_TYPES[kind])
-	if kind in ("war", "peace_with"):
+	if kind in TEAM_ITEMS:
 		t.iData = gc.getPlayer(d).getTeam()
-	elif kind in ("tech", "gold"):
+	elif kind in DATA_ITEMS:
 		t.iData = d
 	else:
 		t.iData = 0
@@ -2377,6 +2466,17 @@ def aiWillingToTalk(ai, me):
 		return False
 	return True
 
+def aiDenial(ai, me, get):
+	# the game's refusals by item (getTradeDenial), e.g. "we don't want to trade that"
+	p = gc.getPlayer(ai)
+	for it in get:
+		if it[0] == "peace":
+			continue
+		den = p.getTradeDenial(me, tradeData(it))
+		if den != DenialTypes.NO_DENIAL:
+			return False, "%s refuses to give %s (%s)" % (pname(ai), itemText(it), gc.getDenialInfo(den).getDescription())
+	return True, "accepted"
+
 def aiAccepts(ai, me, give, get):
 	# give = what Claude gives the AI, get = what the AI gives Claude; follows the game's
 	# CvPlayerAI::AI_considerOffer: refusals by item (getTradeDenial), then value
@@ -2398,6 +2498,12 @@ def executeDeal(a, b, giveA, giveB):
 		checkItem(a, b, it)
 	for it in giveB:
 		checkItem(b, a, it)
+	if engineReady():
+		# the game's own CvGame::implementDeal: ongoing items become real deals, memories as usual
+		if not gc.getPlayer(a).implementDealText(b, engineText(giveA), engineText(giveB)):
+			raise Exception("the game refused the deal")
+		refreshSnapshot()
+		return
 	for it in giveA:
 		doItem(a, b, it)
 	for it in giveB:
@@ -2435,7 +2541,13 @@ def cmdOffer(args):
 				", ".join([itemText(x) for x in give])), "", InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
 		return {"done": True, "gave": [itemText(x) for x in give]}
 	if not gc.getPlayer(other).isHuman():
-		ok, why = aiAccepts(other, iMe, give, get)
+		if engineReady():
+			# the AI's own answer (CvPlayerAI::AI_considerOffer), as on the diplomacy screen
+			ok, why = aiDenial(other, iMe, get)
+			if ok and get and not gc.getPlayer(other).AI_considerOfferText(iMe, engineText(give), engineText(get)):
+				ok, why = False, "%s turns it down (not worth it to them)" % pname(other)
+		else:
+			ok, why = aiAccepts(other, iMe, give, get)
 		if not ok:
 			writeEvent("deal_refused", {"with": pname(other), "why": why})
 			return {"done": False, "why": why}
@@ -2516,6 +2628,168 @@ def dealApplyTrampoline(playerID, userData, popupReturn):
 
 def dealBeginTrampoline(argsList=-1):
 	return 0
+
+# ------------------------------------------------- the CIVAI engine: Claude decides
+#
+# With the CIVAI game engine (CvGameCoreDLL built from ~/civai-sdk/src/claude), Claude's civ is
+# flagged (CyPlayer.setClaude) and the built-in AI makes no choices for it: research, budget,
+# civics, religion, upgrades, promotions, rushing, disbanding, deals, war and peace. Units and
+# cities Claude hasn't claimed stay with the game's automation (like a human's automated workers).
+# AI leaders ask instead of deciding for him: their proposals, demands and requests arrive as the
+# game event "claudeDiplomacy", offers made to him (the human's diplomacy screen) as "claudeOffered".
+# They wait in proposals.json until Claude answers (`civ answer`) or the next turn ends.
+
+PROPOSALS_FILE = OUT_DIR + "\\proposals.json"
+g_engineOn = [False]
+
+def engineReady():
+	return hasattr(gc.getPlayer(0), "setClaude")
+
+def engineControl():
+	return g_engineOn[0]
+
+def ensureEngineControl():
+	iMe = getClaudePlayer()
+	if iMe < 0 or not engineReady():
+		g_engineOn[0] = False
+		return
+	p = gc.getPlayer(iMe)
+	if not p.isClaude():
+		p.setClaude(True)
+		log("engine control on for player %d" % iMe)
+		if not g_engineOn[0]:
+			writeEvent("engine_control", {"note": "the built-in AI makes no choices for your civ any more; "
+				"AI leaders ask you (civ proposals / civ answer)"})
+	g_engineOn[0] = True
+
+def loadProposals():
+	if not os.path.exists(PROPOSALS_FILE):
+		return {"next": 1, "open": {}}
+	f = open(PROPOSALS_FILE, "rb")
+	try:
+		return fromJson(f.read())
+	finally:
+		f.close()
+
+def saveProposals(o):
+	writeAtomic(PROPOSALS_FILE, toJson(o))
+
+def commentName(i):
+	try:
+		return gc.getDiplomacyInfo(i).getType().replace("AI_DIPLOCOMMENT_", "").lower()
+	except:
+		return "comment_%d" % i
+
+# what each request means and which answers the game records (CvDiplomacy.py, CvPlayer::handleDiploEvent)
+ANSWERS = {
+	"ask_for_help": ("DIPLOEVENT_GIVE_HELP", "DIPLOEVENT_REFUSED_HELP"),
+	"demand_tribute": ("DIPLOEVENT_ACCEPT_DEMAND", "DIPLOEVENT_REJECTED_DEMAND"),
+	"religion_pressure": ("DIPLOEVENT_CONVERT", "DIPLOEVENT_NO_CONVERT"),
+	"civic_pressure": ("DIPLOEVENT_REVOLUTION", "DIPLOEVENT_NO_REVOLUTION"),
+	"join_war": ("DIPLOEVENT_JOIN_WAR", "DIPLOEVENT_NO_JOIN_WAR"),
+	"stop_trading": ("DIPLOEVENT_STOP_TRADING", "DIPLOEVENT_NO_STOP_TRADING"),
+}
+TRADES = ("offer_deal", "offer_peace", "offer_city", "offer_vassal", "give_help", "screen_offer")
+
+def proposalText(v):
+	who = pname(v["from"])
+	gives = ", ".join([itemText(tuple(x)) for x in v["gives"]]) or "nothing"
+	wants = ", ".join([itemText(tuple(x)) for x in v["wants"]]) or "nothing"
+	c = v["comment"]
+	if c == "screen_offer":
+		return "%s offers on the diplomacy screen: you get %s; they get %s" % (who, gives, wants)
+	if c == "offer_peace":
+		return "%s offers peace: you get %s; they get %s" % (who, gives, wants)
+	if c in ("offer_deal", "offer_city", "offer_vassal"):
+		return "%s offers a deal: you get %s; they get %s" % (who, gives, wants)
+	if c == "give_help":
+		return "%s offers help as a gift: %s" % (who, gives)
+	if c == "ask_for_help":
+		return "%s asks for help: %s" % (who, wants)
+	if c == "demand_tribute":
+		return "%s demands tribute: %s (refusing may mean war)" % (who, wants)
+	if c == "religion_pressure":
+		return "%s asks you to convert to %s" % (who, religionName(gc.getPlayer(v["from"]).getStateReligion()))
+	if c == "civic_pressure":
+		fav = gc.getLeaderHeadInfo(gc.getPlayer(v["from"]).getPersonalityType()).getFavoriteCivic()
+		return "%s asks you to switch to %s" % (who, fav >= 0 and gc.getCivicInfo(fav).getDescription() or "their civic")
+	if c == "join_war":
+		return "%s asks you to join their war on %s" % (who, gc.getTeam(v["data"]).getName())
+	if c == "stop_trading":
+		return "%s asks you to stop trading with %s" % (who, gc.getTeam(v["data"]).getName())
+	if c == "cancel_deal":
+		return "%s cancels a deal with you: %s / %s" % (who, gives, wants)
+	return "%s says something (%s)" % (who, c)
+
+def newProposal(frm, comment, data, gives, wants):
+	o = loadProposals()
+	for k, v in o["open"].items():
+		if v["from"] == frm and v["comment"] == comment and v["gives"] == gives and v["wants"] == wants:
+			return   # the same offer again (the diplomacy screen asks more than once)
+	v = {"from": frm, "comment": comment, "data": data, "gives": gives, "wants": wants,
+		"turn": gc.getGame().getGameTurn()}
+	needs = comment in TRADES or ANSWERS.has_key(comment)
+	if not needs:
+		writeEvent("diplomacy", {"text": proposalText(v)})
+		return
+	n = o["next"]
+	o["next"] = n + 1
+	o["open"][str(n)] = v
+	saveProposals(o)
+	writeEvent("proposal", {"id": n, "text": proposalText(v),
+		"answer": "civ answer %d yes|no (open until the end of next turn)" % n})
+
+def answerProposal(n, yes, why=None):
+	iMe = getClaudePlayer()
+	o = loadProposals()
+	v = o["open"].get(str(n))
+	if v is None:
+		raise Exception("no open proposal #%s (civ proposals)" % n)
+	ai = gc.getPlayer(v["from"])
+	gives = [tuple(x) for x in v["gives"]]
+	wants = [tuple(x) for x in v["wants"]]
+	c = v["comment"]
+	done = []
+	if yes and (gives or wants):
+		executeDeal(v["from"], iMe, gives, wants)
+		done.append("deal made")
+	if ANSWERS.has_key(c) and not ai.isHuman():
+		ev = getattr(DiploEventTypes, ANSWERS[c][not yes and 1 or 0])
+		ai.handleDiploEvent(ev, iMe, v.get("data", -1), -1)
+		done.append(ANSWERS[c][not yes and 1 or 0].replace("DIPLOEVENT_", "").lower().replace("_", " "))
+		if c == "demand_tribute" and not yes and ai.AI_demandRebukedWar(iMe):
+			ai.handleDiploEvent(DiploEventTypes.DIPLOEVENT_DEMAND_WAR, iMe, -1, -1)
+			done.append("%s declares war" % pname(v["from"]))
+	del o["open"][str(n)]
+	saveProposals(o)
+	refreshSnapshot()
+	writeEvent("proposal_answered", {"id": int(n), "answer": yes and "yes" or "no", "what": proposalText(v),
+		"result": done, "why": why})
+	return {"id": int(n), "answer": yes and "yes" or "no", "result": done or ["nothing changes"]}
+
+def expireProposals():
+	# a human must answer on the screen at once; Claude has until his next turn ends
+	now = gc.getGame().getGameTurn()
+	o = loadProposals()
+	for k, v in o["open"].items():
+		if v["turn"] < now:
+			try:
+				answerProposal(k, False, "no answer in time")
+			except:
+				log("proposal expiry FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
+
+def cmdProposals(args):
+	o = loadProposals()
+	return {"open": ["#%s (turn %d): %s" % (k, v["turn"], proposalText(v)) for k, v in o["open"].items()] or ["none"],
+		"answer": "civ answer N yes|no"}
+
+def cmdAnswer(args):
+	return answerProposal(str(args["id"]).lstrip("#"), args["answer"].lower() in ("yes", "y", "accept", "ok"))
+
+def engineArgs(a):
+	if len(a) == 1 and type(a[0]) == type(()):
+		return a[0]
+	return a
 
 def cmdOffers(args):
 	o = loadOffers()
@@ -2846,6 +3120,16 @@ def cmdBuild(args):
 	c = findCity(args)
 	if c.getOwner() != iMe:
 		raise Exception("%s is not our city" % c.getName())
+	if args["item"].strip().lower() == "auto":
+		# hand the city to the game's automation: the built-in AI picks its builds
+		d = loadCityClaims()
+		if d.has_key(cityKey(c)):
+			del d[cityKey(c)]
+			saveCityClaims(d)
+		if g_queueWaiting.has_key(cityKey(c)):
+			del g_queueWaiting[cityKey(c)]
+		return {"city": c.getName(), "builds": "chosen by the game's automation until you `civ build` here",
+			"queue": [orderName(c.getOrderFromQueue(k)) for k in range(c.getOrderQueueLength())]}
 	order, i, name = findItem(args["item"])
 	if order == OrderTypes.ORDER_TRAIN:
 		possible = c.canTrain(i, False, False)
@@ -2857,6 +3141,8 @@ def cmdBuild(args):
 		possible = c.canMaintain(i, False)
 	if not possible:
 		raise Exception("%s can't build %s now" % (c.getName(), name))
+	if g_queueWaiting.has_key(cityKey(c)):
+		del g_queueWaiting[cityKey(c)]
 	if args.get("check"):
 		return {"city": c.getName(), "item": name, "possible": True}
 	if args.get("queue"):
@@ -2901,6 +3187,8 @@ def cmdHurry(args):
 	return {"city": c.getName(), "hurried": building, "paid_population": pop, "paid_gold": gold,
 		"finishes": "at the start of our next turn"}
 
+g_queueWaiting = {}
+
 def aiChooseProduction(gu, argsList):
 	# the game clears a city's queue before asking us, so we put Claude's remaining
 	# items back; only when Claude's queue is used up does the built-in AI choose
@@ -2914,6 +3202,14 @@ def aiChooseProduction(gu, argsList):
 		if c.getOrderQueueLength() > 0:
 			return True
 	elif q is not None and c.getOwner() == getClaudePlayer():
+		if engineControl():
+			# the list is done: the city waits for Claude (as a human's city waits for its owner)
+			if not g_queueWaiting.has_key(cityKey(c)):
+				g_queueWaiting[cityKey(c)] = True
+				writeEvent("city_queue_done", {"city": c.getName(),
+					"note": "your build list here is finished and the city builds nothing until you `civ build` "
+					"(or `civ build %s auto` hands it to the game's automation)" % c.getName()})
+			return True
 		# Claude's list for this city is done: tell Claude once, the built-in AI fills in meanwhile
 		del d[cityKey(c)]
 		saveCityClaims(d)
@@ -2974,7 +3270,7 @@ def setReady(byWhom):
 
 ATTENTION_KINDS = ("first_contact", "war_declared", "peace_made", "city_founded", "city_changed_hands",
 	"city_razed", "combat", "tech_learned", "building_built", "project_built", "religion_founded",
-	"great_person", "golden_age", "unit_arrived", "unit_done", "deal_done", "deal_declined", "deal_failed", "native_deal", "unit_disbanded",
+	"great_person", "golden_age", "unit_arrived", "unit_done", "deal_done", "deal_declined", "deal_failed", "native_deal", "unit_disbanded", "proposal", "diplomacy",
 	"unit_waiting", "city_queue_done", "deal_ended", "budget_suspended")
 
 def noteAttention(kind):
@@ -3151,6 +3447,8 @@ COMMANDS = {
 	"actions": cmdActions,
 	"offer": cmdOffer,
 	"offers": cmdOffers,
+	"proposals": cmdProposals,
+	"answer": cmdAnswer,
 	"tradeable": cmdTradeable,
 	"religion": cmdReligion,
 	"civics": cmdCivics,
@@ -3225,6 +3523,10 @@ def poll():
 			os.makedirs(REPLY_DIR)
 		names = [n for n in os.listdir(IN_DIR) if n.endswith(".json")]
 		if gameReady():
+			try:
+				ensureEngineControl()
+			except:
+				log("engine control FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 			try:
 				guardChoices(bool(names))   # answers always see the state with the AI's moves undone
 			except:

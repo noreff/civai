@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 
-BRIDGE = os.path.expanduser("~/Library/Application Support/CrossOver/Bottles/civ4/drive_c/claude_bridge")
+BRIDGE = os.path.expanduser("~/Library/Application Support/CrossOver/Bottles/%s/drive_c/claude_bridge" % os.environ.get("CIV_BOTTLE", "civ4"))
 EVENTS, EXEC_LOG, BRIDGE_LOG = (os.path.join(BRIDGE, n) for n in ("events.jsonl", "exec.log", "bridge.log"))
 STUCK = int(sys.argv[sys.argv.index("--stuck-seconds") + 1]) if "--stuck-seconds" in sys.argv else 300
 

@@ -26,6 +26,11 @@
                            !accept N / !decline N in chat (deal_done / deal_declined events)
   civ give <player> ITEM...  a gift (no answer needed), e.g. civ give India tech:Alphabet
   civ offers               open offers waiting for an answer
+  civ proposals            what other leaders proposed, demanded or asked of us (they wait for
+                           our answer until the end of the next turn; no answer = no)
+  civ answer N yes|no      answer proposal N: a deal is made by the game's own rules; a refused
+                           demand may mean war; requests (convert, switch civic, join a war,
+                           stop trading) take effect on yes
   civ tradeable <player>   what each side can trade right now (the game's trade screen)
   civ rules <name>         the game's rules for a tech, unit, building, civic, worker build
                            or resource (cost, requirements, what it unlocks, strategy text),
@@ -61,6 +66,7 @@
                            no tech: what we research, the queue, what we can research (turns);
                            tech: research it now (missing prerequisites are queued first);
                            --queue: add it after the current queue
+  civ build <city> auto    hand a city's builds to the game's automation (until you civ build there)
   civ build <city> <item> [--queue|--first|--check]
                            what a city builds (unit, building, project, or Wealth/Research);
                            replaces the current item unless --queue (at the end) / --first;
@@ -100,7 +106,7 @@ import time
 import uuid
 
 BRIDGE = os.path.expanduser(
-    "~/Library/Application Support/CrossOver/Bottles/civ4/drive_c/claude_bridge")
+    "~/Library/Application Support/CrossOver/Bottles/%s/drive_c/claude_bridge" % os.environ.get("CIV_BOTTLE", "civ4"))
 IN_DIR = os.path.join(BRIDGE, "in")
 OUT_DIR = os.path.join(BRIDGE, "out")
 TIMEOUT = float(os.environ.get("CIV_TIMEOUT", "120"))
@@ -449,6 +455,12 @@ def main(argv):
                     else:
                         side.extend(x.strip() for x in a.split(",") if x.strip())
             print(fmt_record(call("offer", {"player": argv[1], "give": give, "get": get})))
+        elif cmd == "proposals":
+            print(fmt_record(call("proposals", {})))
+        elif cmd == "answer":
+            if len(argv) < 3:
+                raise SystemExit("civ answer N yes|no")
+            print(fmt_record(call("answer", {"id": argv[1], "answer": argv[2]})))
         elif cmd == "tradeable":
             print(fmt_record(call("tradeable", {"player": argv[1]})))
         elif cmd == "rules":

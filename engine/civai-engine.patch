@@ -1,0 +1,1038 @@
+diff --git a/CvCityAI.cpp b/CvCityAI.cpp
+index ce2d108..83929dc 100644
+--- a/CvCityAI.cpp
++++ b/CvCityAI.cpp
+@@ -156,7 +156,9 @@ void CvCityAI::AI_doTurn()
+ 
+ 	int iI;
+ 
+-	if (!isHuman())
++	bool bClaude = GET_PLAYER(getOwnerINLINE()).isClaude();	// CIVAI: Claude's cities are run like a human's
++
++	if (!isHuman() && !bClaude)
+ 	{
+ 		for (iI = 0; iI < GC.getNumSpecialistInfos(); iI++)
+ 		{
+@@ -164,7 +166,7 @@ void CvCityAI::AI_doTurn()
+ 		}
+ 	}
+ 	
+-    if (!isHuman())
++    if (!isHuman() && !bClaude)
+ 	{
+ 	    AI_stealPlots();
+ 	}
+@@ -175,9 +177,9 @@ void CvCityAI::AI_doTurn()
+ 
+ 	AI_updateRouteToCity();
+ 
+-	if (isHuman())
++	if (isHuman() || bClaude)
+ 	{
+-	    if (isProductionAutomated())
++	    if (isProductionAutomated() && !bClaude)
+ 	    {
+ 	        AI_doHurry();	        
+ 	    }
+diff --git a/CvPlayer.cpp b/CvPlayer.cpp
+index 584e426..c138680 100644
+--- a/CvPlayer.cpp
++++ b/CvPlayer.cpp
+@@ -476,6 +476,7 @@ void CvPlayer::reset(PlayerTypes eID, bool bConstructorCall)
+ 	m_bExtendedGame = false;
+ 	m_bFoundedFirstCity = false;
+ 	m_bStrike = false;
++	m_bClaude = false;
+ 
+ 	m_eID = eID;
+ 	updateTeamType();
+@@ -2230,6 +2231,21 @@ bool CvPlayer::isHuman() const
+ 	return m_bHuman;
+ }
+ 
++bool CvPlayer::isClaude() const
++{
++	return m_bClaude;
++}
++
++void CvPlayer::setClaude(bool bNewValue)
++{
++	m_bClaude = bNewValue;
++}
++
++bool CvPlayer::isHumanOrClaude() const
++{
++	return m_bHuman || m_bClaude;
++}
++
+ void CvPlayer::updateHuman()
+ {
+ 	if (getID() == NO_PLAYER)
+diff --git a/CvPlayer.h b/CvPlayer.h
+index e9ad0cd..b845481 100644
+--- a/CvPlayer.h
++++ b/CvPlayer.h
+@@ -68,6 +68,9 @@ public:
+ 	CvSelectionGroup* cycleSelectionGroups(CvUnit* pUnit, bool bForward, bool bWorkers, bool* pbWrap);
+ 
+ 	bool hasTrait(TraitTypes eTrait) const;																																			// Exposed to Python						
++	bool isClaude() const;	// CIVAI: Claude decides for this civ; the built-in AI stays out	// Exposed to Python
++	void setClaude(bool bNewValue);	// Exposed to Python
++	bool isHumanOrClaude() const;	// decided by a person or by Claude, not by the built-in AI
+ 	DllExport bool isHuman() const;																																							// Exposed to Python						
+ 	DllExport void updateHuman();
+ 	DllExport bool isBarbarian() const;																																					// Exposed to Python						
+@@ -1149,6 +1152,7 @@ protected:
+ 	bool m_bFoundedFirstCity;
+ 	bool m_bStrike;
+ 	bool m_bHuman;
++	bool m_bClaude;	// CIVAI: not saved; the bridge sets it after every load
+ 
+ 	PlayerTypes m_eID;
+ 	LeaderHeadTypes m_ePersonalityType;
+diff --git a/CvPlayerAI.cpp b/CvPlayerAI.cpp
+index e543137..512a035 100644
+--- a/CvPlayerAI.cpp
++++ b/CvPlayerAI.cpp
+@@ -309,7 +309,7 @@ void CvPlayerAI::AI_doTurnPre()
+ 	
+ 	AI_doEnemyUnitData();
+ 	
+-	if (isHuman())
++	if (isHuman() || isClaude())	// CIVAI: Claude makes these choices himself
+ 	{
+ 		return;
+ 	}
+@@ -342,7 +342,7 @@ void CvPlayerAI::AI_doTurnPost()
+ {
+ 	PROFILE_FUNC();
+ 
+-	if (isHuman())
++	if (isHuman() || isClaude())	// CIVAI: Claude makes these choices himself
+ 	{
+ 		return;
+ 	}
+@@ -380,7 +380,7 @@ void CvPlayerAI::AI_doTurnUnitsPre()
+ 		AI_updateAreaTargets();
+ 	}
+ 
+-	if (isHuman())
++	if (isHuman() || isClaude())	// CIVAI: Claude makes these choices himself
+ 	{
+ 		return;
+ 	}
+@@ -407,7 +407,7 @@ void CvPlayerAI::AI_doTurnUnitsPost()
+ 	int iPass;
+ 	int iLoop;
+ 
+-	if (!isHuman() || isOption(PLAYEROPTION_AUTO_PROMOTION))
++	if ((!isHuman() && !isClaude()) || isOption(PLAYEROPTION_AUTO_PROMOTION))	// CIVAI: promotions and upgrades are Claude's
+ 	{
+ 		for(pLoopUnit = firstUnit(&iLoop); pLoopUnit != NULL; pLoopUnit = nextUnit(&iLoop))
+ 		{
+@@ -415,7 +415,7 @@ void CvPlayerAI::AI_doTurnUnitsPost()
+ 		}
+ 	}
+ 
+-	if (isHuman())
++	if (isHuman() || isClaude())
+ 	{
+ 		return;
+ 	}
+@@ -597,7 +597,7 @@ void CvPlayerAI::AI_doPeace()
+ 													pDiplo->setAIContact(true);
+ 													pDiplo->setOurOfferList(theirList);
+ 													pDiplo->setTheirOfferList(ourList);
+-													gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++													AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 													abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 												}
+ 											}
+@@ -819,7 +819,7 @@ void CvPlayerAI::AI_doPeace()
+ 																pDiplo->setAIContact(true);
+ 																pDiplo->setOurOfferList(theirList);
+ 																pDiplo->setTheirOfferList(ourList);
+-																gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++																AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 																abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 															}
+ 														}
+@@ -5688,6 +5688,48 @@ bool CvPlayerAI::AI_goldDeal(const CLinkList<TradeData>* pList) const
+ }
+ 
+ 
++// CIVAI: a trade list as text for the bridge, "item:data,item:data" (TradeableItems numbers)
++static CvString claudeTradeText(const CLinkList<TradeData>* pList)
++{
++	CvString s;
++	if (pList != NULL)
++	{
++		for (CLLNode<TradeData>* pNode = pList->head(); pNode; pNode = pList->next(pNode))
++		{
++			CvString item;
++			item.Format("%d:%d", (int)pNode->m_data.m_eItemType, pNode->m_data.m_iData);
++			if (!s.empty())
++			{
++				s += ",";
++			}
++			s += item;
++		}
++	}
++	return s;
++}
++
++// CIVAI: the AI opens the diplomacy screen with a player. Claude has no screen: his proposals,
++// demands and requests go to the bridge as the game event "claudeDiplomacy" and he answers there.
++void CvPlayerAI::AI_beginDiplomacy(CvDiploParameters* pDiplo, PlayerTypes ePlayer)
++{
++	if (GET_PLAYER(ePlayer).isClaude())
++	{
++		CvString szGives = claudeTradeText(&(pDiplo->getOurOfferList()));
++		CvString szWants = claudeTradeText(&(pDiplo->getTheirOfferList()));
++		CyArgsList args;
++		args.add((int)getID());
++		args.add((int)ePlayer);
++		args.add((int)pDiplo->getDiploComment());
++		args.add(pDiplo->getData());
++		args.add(szGives.c_str());
++		args.add(szWants.c_str());
++		CvEventReporter::getInstance().genericEvent("claudeDiplomacy", args.makeFunctionArgs());
++		SAFE_DELETE(pDiplo);
++		return;
++	}
++	gDLL->beginDiplomacy(pDiplo, ePlayer);
++}
++
+ bool CvPlayerAI::AI_considerOffer(PlayerTypes ePlayer, const CLinkList<TradeData>* pTheirList, const CLinkList<TradeData>* pOurList, int iChange) const
+ {
+ 	CLLNode<TradeData>* pNode;
+@@ -5695,6 +5737,21 @@ bool CvPlayerAI::AI_considerOffer(PlayerTypes ePlayer, const CLinkList<TradeData
+ 
+ 	FAssertMsg(ePlayer != getID(), "shouldn't call this function on ourselves");
+ 
++	if (isClaude())
++	{
++		// CIVAI: Claude answers offers himself; the bridge tells him (game event "claudeOffered")
++		CvString szGives = claudeTradeText(pTheirList);
++		CvString szWants = claudeTradeText(pOurList);
++		CyArgsList args;
++		args.add((int)ePlayer);
++		args.add((int)getID());
++		args.add(iChange);
++		args.add(szGives.c_str());
++		args.add(szWants.c_str());
++		CvEventReporter::getInstance().genericEvent("claudeOffered", args.makeFunctionArgs());
++		return false;
++	}
++
+ 	if (AI_goldDeal(pTheirList) && AI_goldDeal(pOurList))
+ 	{
+ 		return false;
+@@ -10905,7 +10962,7 @@ void CvPlayerAI::AI_doDiplo()
+ 		{
+ 			if (GET_PLAYER((PlayerTypes)iI).isAlive())
+ 			{
+-				if (GET_PLAYER((PlayerTypes)iI).isHuman() == (iPass == 1))
++				if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude() == (iPass == 1))
+ 				{
+ 					if (iI != getID())
+ 					{
+@@ -10921,7 +10978,7 @@ void CvPlayerAI::AI_doDiplo()
+ 
+ 										if ((pLoopDeal->getFirstPlayer() == getID()) && (pLoopDeal->getSecondPlayer() == ((PlayerTypes)iI)))
+ 										{
+-											if (GET_PLAYER((PlayerTypes)iI).isHuman())
++											if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude())
+ 											{
+ 												if (!AI_considerOffer(((PlayerTypes)iI), pLoopDeal->getSecondTrades(), pLoopDeal->getFirstTrades(), -1))
+ 												{
+@@ -10942,7 +10999,7 @@ void CvPlayerAI::AI_doDiplo()
+ 										}
+ 										else if ((pLoopDeal->getFirstPlayer() == ((PlayerTypes)iI)) && (pLoopDeal->getSecondPlayer() == getID()))
+ 										{
+-											if (GET_PLAYER((PlayerTypes)iI).isHuman())
++											if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude())
+ 											{
+ 												if (!AI_considerOffer(((PlayerTypes)iI), pLoopDeal->getFirstTrades(), pLoopDeal->getSecondTrades(), -1))
+ 												{
+@@ -10966,7 +11023,7 @@ void CvPlayerAI::AI_doDiplo()
+ 										{
+ 											if (canContact((PlayerTypes)iI) && AI_isWillingToTalk((PlayerTypes)iI))
+ 											{
+-												if (GET_PLAYER((PlayerTypes)iI).isHuman())
++												if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude())
+ 												{
+ 													ourList.clear();
+ 													theirList.clear();
+@@ -11002,7 +11059,7 @@ void CvPlayerAI::AI_doDiplo()
+ 													{
+ 														pDiplo->setDiploComment((DiploCommentTypes)GC.getInfoTypeForString("AI_DIPLOCOMMENT_NO_VASSAL"));
+ 														pDiplo->setAIContact(true);
+-														gDLL->beginDiplomacy(pDiplo, ((PlayerTypes)iI));
++														AI_beginDiplomacy(pDiplo, ((PlayerTypes)iI));
+ 
+ 													}
+ 													else
+@@ -11011,7 +11068,7 @@ void CvPlayerAI::AI_doDiplo()
+ 														pDiplo->setAIContact(true);
+ 														pDiplo->setOurOfferList(theirList);
+ 														pDiplo->setTheirOfferList(ourList);
+-														gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++														AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 													}
+ 													abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 												}
+@@ -11064,7 +11121,7 @@ void CvPlayerAI::AI_doDiplo()
+ 									setTradeItem(&item, TRADE_RESOURCES, eBestGiveBonus);
+ 									ourList.insertAtEnd(item);
+ 
+-									if (GET_PLAYER((PlayerTypes)iI).isHuman())
++									if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude())
+ 									{
+ 										if (!(abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()]))
+ 										{
+@@ -11073,7 +11130,7 @@ void CvPlayerAI::AI_doDiplo()
+ 											pDiplo->setDiploComment((DiploCommentTypes)GC.getInfoTypeForString("AI_DIPLOCOMMENT_GIVE_HELP"));
+ 											pDiplo->setAIContact(true);
+ 											pDiplo->setTheirOfferList(ourList);
+-											gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++											AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 											abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 										}
+ 									}
+@@ -11116,7 +11173,7 @@ void CvPlayerAI::AI_doDiplo()
+ 									setTradeItem(&item, TRADE_TECHNOLOGIES, eBestGiveTech);
+ 									ourList.insertAtEnd(item);
+ 
+-									if (GET_PLAYER((PlayerTypes)iI).isHuman())
++									if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude())
+ 									{
+ 										if (!(abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()]))
+ 										{
+@@ -11125,7 +11182,7 @@ void CvPlayerAI::AI_doDiplo()
+ 											pDiplo->setDiploComment((DiploCommentTypes)GC.getInfoTypeForString("AI_DIPLOCOMMENT_GIVE_HELP"));
+ 											pDiplo->setAIContact(true);
+ 											pDiplo->setTheirOfferList(ourList);
+-											gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++											AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 											abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 										}
+ 									}
+@@ -11136,7 +11193,7 @@ void CvPlayerAI::AI_doDiplo()
+ 								}
+ 							}
+ 
+-							if (GET_PLAYER((PlayerTypes)iI).getTeam() != getTeam() && !(GET_TEAM(getTeam()).isHuman()) && (GET_PLAYER((PlayerTypes)iI).isHuman() || !(GET_TEAM(GET_PLAYER((PlayerTypes)iI).getTeam()).isHuman())))
++							if (GET_PLAYER((PlayerTypes)iI).getTeam() != getTeam() && !(GET_TEAM(getTeam()).isHuman()) && (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude() || !(GET_TEAM(GET_PLAYER((PlayerTypes)iI).getTeam()).isHumanOrClaude())))
+ 							{
+ 								FAssertMsg(!(GET_PLAYER((PlayerTypes)iI).isBarbarian()), "(GET_PLAYER((PlayerTypes)iI).isBarbarian()) did not return false as expected");
+ 								FAssertMsg(iI != getID(), "iI is not expected to be equal with getID()");
+@@ -11168,7 +11225,7 @@ void CvPlayerAI::AI_doDiplo()
+ 										setTradeItem(&item, TRADE_RESOURCES, eBestGiveBonus);
+ 										theirList.insertAtEnd(item);
+ 
+-										if (GET_PLAYER((PlayerTypes)iI).isHuman())
++										if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude())
+ 										{
+ 											if (!(abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()]))
+ 											{
+@@ -11225,7 +11282,7 @@ void CvPlayerAI::AI_doDiplo()
+ 
+ 															ourList.insertAtEnd(item);
+ 
+-															if (GET_PLAYER((PlayerTypes)iI).isHuman())
++															if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude())
+ 															{
+ 																//if (!(abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()]))
+ 																{
+@@ -11234,7 +11291,7 @@ void CvPlayerAI::AI_doDiplo()
+ 																	pDiplo->setDiploComment((DiploCommentTypes)GC.getInfoTypeForString("AI_DIPLOCOMMENT_OFFER_CITY"));
+ 																	pDiplo->setAIContact(true);
+ 																	pDiplo->setTheirOfferList(ourList);
+-																	gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++																	AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 																	abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 																}
+ 															}
+@@ -11268,7 +11325,7 @@ void CvPlayerAI::AI_doDiplo()
+ 
+ 													bOffered = true;
+ 
+-													if (GET_PLAYER((PlayerTypes)iI).isHuman())
++													if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude())
+ 													{
+ 														if (!(abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()]))
+ 														{
+@@ -11279,7 +11336,7 @@ void CvPlayerAI::AI_doDiplo()
+ 															pDiplo->setAIContact(true);
+ 															pDiplo->setOurOfferList(theirList);
+ 															pDiplo->setTheirOfferList(ourList);
+-															gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++															AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 															abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 														}
+ 													}
+@@ -11302,7 +11359,7 @@ void CvPlayerAI::AI_doDiplo()
+ 
+ 													ourList.insertAtEnd(item);
+ 
+-													if (GET_PLAYER((PlayerTypes)iI).isHuman())
++													if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude())
+ 													{
+ 														if (!(abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()]))
+ 														{
+@@ -11313,7 +11370,7 @@ void CvPlayerAI::AI_doDiplo()
+ 															pDiplo->setAIContact(true);
+ 															pDiplo->setOurOfferList(theirList);
+ 															pDiplo->setTheirOfferList(ourList);
+-															gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++															AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 															abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 														}
+ 													}
+@@ -11346,7 +11403,7 @@ void CvPlayerAI::AI_doDiplo()
+ 										}
+ 									}
+ 
+-									if (GET_PLAYER((PlayerTypes)iI).isHuman() && (GET_TEAM(getTeam()).getLeaderID() == getID()) && !GET_TEAM(getTeam()).isVassal(GET_PLAYER((PlayerTypes)iI).getTeam()))
++									if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude() && (GET_TEAM(getTeam()).getLeaderID() == getID()) && !GET_TEAM(getTeam()).isVassal(GET_PLAYER((PlayerTypes)iI).getTeam()))
+ 									{
+ 										if (getStateReligion() != NO_RELIGION)
+ 										{
+@@ -11363,7 +11420,7 @@ void CvPlayerAI::AI_doDiplo()
+ 															FAssertMsg(pDiplo != NULL, "pDiplo must be valid");
+ 															pDiplo->setDiploComment((DiploCommentTypes)GC.getInfoTypeForString("AI_DIPLOCOMMENT_RELIGION_PRESSURE"));
+ 															pDiplo->setAIContact(true);
+-															gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++															AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 															abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 														}
+ 													}
+@@ -11372,7 +11429,7 @@ void CvPlayerAI::AI_doDiplo()
+ 										}
+ 									}
+ 
+-									if (GET_PLAYER((PlayerTypes)iI).isHuman() && (GET_TEAM(getTeam()).getLeaderID() == getID()) && !GET_TEAM(getTeam()).isVassal(GET_PLAYER((PlayerTypes)iI).getTeam()))
++									if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude() && (GET_TEAM(getTeam()).getLeaderID() == getID()) && !GET_TEAM(getTeam()).isVassal(GET_PLAYER((PlayerTypes)iI).getTeam()))
+ 									{
+ 										eFavoriteCivic = ((CivicTypes)(GC.getLeaderHeadInfo(getPersonalityType()).getFavoriteCivic()));
+ 
+@@ -11395,7 +11452,7 @@ void CvPlayerAI::AI_doDiplo()
+ 																	FAssertMsg(pDiplo != NULL, "pDiplo must be valid");
+ 																	pDiplo->setDiploComment((DiploCommentTypes)GC.getInfoTypeForString("AI_DIPLOCOMMENT_CIVIC_PRESSURE"), GC.getCivicInfo(eFavoriteCivic).getTextKeyWide());
+ 																	pDiplo->setAIContact(true);
+-																	gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++																	AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 																	abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 																}
+ 															}
+@@ -11406,7 +11463,7 @@ void CvPlayerAI::AI_doDiplo()
+ 										}
+ 									}
+ 
+-									if (GET_PLAYER((PlayerTypes)iI).isHuman() && (GET_TEAM(getTeam()).getLeaderID() == getID()))
++									if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude() && (GET_TEAM(getTeam()).getLeaderID() == getID()))
+ 									{
+ 										if ((AI_getMemoryCount(((PlayerTypes)iI), MEMORY_DECLARED_WAR) == 0) && (AI_getMemoryCount(((PlayerTypes)iI), MEMORY_HIRED_WAR_ALLY) == 0))
+ 										{
+@@ -11450,7 +11507,7 @@ void CvPlayerAI::AI_doDiplo()
+ 															pDiplo->setDiploComment((DiploCommentTypes)GC.getInfoTypeForString("AI_DIPLOCOMMENT_JOIN_WAR"), GET_PLAYER(GET_TEAM(eBestTeam).getLeaderID()).getCivilizationAdjectiveKey());
+ 															pDiplo->setAIContact(true);
+ 															pDiplo->setData(eBestTeam);
+-															gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++															AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 															abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 														}
+ 													}
+@@ -11459,7 +11516,7 @@ void CvPlayerAI::AI_doDiplo()
+ 										}
+ 									}
+ 
+-									if (GET_PLAYER((PlayerTypes)iI).isHuman() && (GET_TEAM(getTeam()).getLeaderID() == getID()) && !GET_TEAM(getTeam()).isVassal(GET_PLAYER((PlayerTypes)iI).getTeam()))
++									if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude() && (GET_TEAM(getTeam()).getLeaderID() == getID()) && !GET_TEAM(getTeam()).isVassal(GET_PLAYER((PlayerTypes)iI).getTeam()))
+ 									{
+ 										if (AI_getContactTimer(((PlayerTypes)iI), CONTACT_STOP_TRADING) == 0)
+ 										{
+@@ -11482,7 +11539,7 @@ void CvPlayerAI::AI_doDiplo()
+ 															pDiplo->setDiploComment((DiploCommentTypes)GC.getInfoTypeForString("AI_DIPLOCOMMENT_STOP_TRADING"), GET_PLAYER(GET_TEAM(eBestTeam).getLeaderID()).getCivilizationAdjectiveKey());
+ 															pDiplo->setAIContact(true);
+ 															pDiplo->setData(eBestTeam);
+-															gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++															AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 															abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 														}
+ 													}
+@@ -11491,7 +11548,7 @@ void CvPlayerAI::AI_doDiplo()
+ 										}
+ 									}
+ 
+-									if (GET_PLAYER((PlayerTypes)iI).isHuman() && (GET_TEAM(getTeam()).getLeaderID() == getID()))
++									if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude() && (GET_TEAM(getTeam()).getLeaderID() == getID()))
+ 									{
+ 										if (GET_TEAM(GET_PLAYER((PlayerTypes)iI).getTeam()).getAssets() < (GET_TEAM(getTeam()).getAssets() / 2))
+ 										{
+@@ -11537,7 +11594,7 @@ void CvPlayerAI::AI_doDiplo()
+ 																pDiplo->setDiploComment((DiploCommentTypes)GC.getInfoTypeForString("AI_DIPLOCOMMENT_GIVE_HELP"));
+ 																pDiplo->setAIContact(true);
+ 																pDiplo->setTheirOfferList(ourList);
+-																gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++																AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 																abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 															}
+ 														}
+@@ -11547,7 +11604,7 @@ void CvPlayerAI::AI_doDiplo()
+ 										}
+ 									}
+ 
+-									if (GET_PLAYER((PlayerTypes)iI).isHuman() && (GET_TEAM(getTeam()).getLeaderID() == getID()))
++									if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude() && (GET_TEAM(getTeam()).getLeaderID() == getID()))
+ 									{
+ 										if (GET_TEAM(GET_PLAYER((PlayerTypes)iI).getTeam()).getAssets() > (GET_TEAM(getTeam()).getAssets() / 2))
+ 										{
+@@ -11589,7 +11646,7 @@ void CvPlayerAI::AI_doDiplo()
+ 															pDiplo->setDiploComment((DiploCommentTypes)GC.getInfoTypeForString("AI_DIPLOCOMMENT_ASK_FOR_HELP"));
+ 															pDiplo->setAIContact(true);
+ 															pDiplo->setOurOfferList(theirList);
+-															gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++															AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 															abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 														}
+ 													}
+@@ -11598,7 +11655,7 @@ void CvPlayerAI::AI_doDiplo()
+ 										}
+ 									}
+ 
+-									if (GET_PLAYER((PlayerTypes)iI).isHuman() && (GET_TEAM(getTeam()).getLeaderID() == getID()))
++									if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude() && (GET_TEAM(getTeam()).getLeaderID() == getID()))
+ 									{
+ 										if (GET_TEAM(getTeam()).canDeclareWar(GET_PLAYER((PlayerTypes)iI).getTeam()) && !GET_TEAM(getTeam()).AI_isSneakAttackPreparing(GET_PLAYER((PlayerTypes)iI).getTeam()))
+ 										{
+@@ -11629,7 +11686,7 @@ void CvPlayerAI::AI_doDiplo()
+ 																	pDiplo->setDiploComment((DiploCommentTypes)GC.getInfoTypeForString("AI_DIPLOCOMMENT_DEMAND_TRIBUTE"));
+ 																	pDiplo->setAIContact(true);
+ 																	pDiplo->setOurOfferList(theirList);
+-																	gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++																	AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 																	abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 																}
+ 															}
+@@ -11640,7 +11697,7 @@ void CvPlayerAI::AI_doDiplo()
+ 										}
+ 									}
+ 
+-									if (GET_PLAYER((PlayerTypes)iI).isHuman() && (GET_TEAM(getTeam()).getLeaderID() == getID()))
++									if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude() && (GET_TEAM(getTeam()).getLeaderID() == getID()))
+ 									{
+ 										if (GET_TEAM(getTeam()).canDeclareWar(GET_PLAYER((PlayerTypes)iI).getTeam()) && !GET_TEAM(getTeam()).AI_isSneakAttackPreparing(GET_PLAYER((PlayerTypes)iI).getTeam()))
+ 										{
+@@ -11667,7 +11724,7 @@ void CvPlayerAI::AI_doDiplo()
+ 																	pDiplo->setDiploComment((DiploCommentTypes)GC.getInfoTypeForString("AI_DIPLOCOMMENT_DEMAND_TRIBUTE"));
+ 																	pDiplo->setAIContact(true);
+ 																	pDiplo->setOurOfferList(theirList);
+-																	gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++																	AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 																	abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 																}
+ 															}
+@@ -11678,7 +11735,7 @@ void CvPlayerAI::AI_doDiplo()
+ 										}
+ 									}
+ 
+-									if (GET_PLAYER((PlayerTypes)iI).isHuman() && (GET_TEAM(getTeam()).getLeaderID() == getID()))
++									if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude() && (GET_TEAM(getTeam()).getLeaderID() == getID()))
+ 									{
+ 										if (GET_TEAM(getTeam()).canDeclareWar(GET_PLAYER((PlayerTypes)iI).getTeam()) && !GET_TEAM(getTeam()).AI_isSneakAttackPreparing(GET_PLAYER((PlayerTypes)iI).getTeam()))
+ 										{
+@@ -11727,7 +11784,7 @@ void CvPlayerAI::AI_doDiplo()
+ 																	pDiplo->setDiploComment((DiploCommentTypes)GC.getInfoTypeForString("AI_DIPLOCOMMENT_DEMAND_TRIBUTE"));
+ 																	pDiplo->setAIContact(true);
+ 																	pDiplo->setOurOfferList(theirList);
+-																	gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++																	AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 																	abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 																}
+ 															}
+@@ -11738,7 +11795,7 @@ void CvPlayerAI::AI_doDiplo()
+ 										}
+ 									}
+ 
+-									if (GET_PLAYER((PlayerTypes)iI).isHuman() && (GET_TEAM(getTeam()).getLeaderID() == getID()))
++									if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude() && (GET_TEAM(getTeam()).getLeaderID() == getID()))
+ 									{
+ 										if (GET_TEAM(getTeam()).canDeclareWar(GET_PLAYER((PlayerTypes)iI).getTeam()) && !GET_TEAM(getTeam()).AI_isSneakAttackPreparing(GET_PLAYER((PlayerTypes)iI).getTeam()))
+ 										{
+@@ -11790,7 +11847,7 @@ void CvPlayerAI::AI_doDiplo()
+ 																	pDiplo->setDiploComment((DiploCommentTypes)GC.getInfoTypeForString("AI_DIPLOCOMMENT_DEMAND_TRIBUTE"));
+ 																	pDiplo->setAIContact(true);
+ 																	pDiplo->setOurOfferList(theirList);
+-																	gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++																	AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 																	abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 																}
+ 															}
+@@ -11817,7 +11874,7 @@ void CvPlayerAI::AI_doDiplo()
+ 													ourList.insertAtEnd(item);
+ 													theirList.insertAtEnd(item);
+ 
+-													if (GET_PLAYER((PlayerTypes)iI).isHuman())
++													if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude())
+ 													{
+ 														if (!(abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()]))
+ 														{
+@@ -11828,7 +11885,7 @@ void CvPlayerAI::AI_doDiplo()
+ 															pDiplo->setAIContact(true);
+ 															pDiplo->setOurOfferList(theirList);
+ 															pDiplo->setTheirOfferList(ourList);
+-															gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++															AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 															abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 														}
+ 													}
+@@ -11857,7 +11914,7 @@ void CvPlayerAI::AI_doDiplo()
+ 													ourList.insertAtEnd(item);
+ 													theirList.insertAtEnd(item);
+ 
+-													if (GET_PLAYER((PlayerTypes)iI).isHuman())
++													if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude())
+ 													{
+ 														if (!(abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()]))
+ 														{
+@@ -11868,7 +11925,7 @@ void CvPlayerAI::AI_doDiplo()
+ 															pDiplo->setAIContact(true);
+ 															pDiplo->setOurOfferList(theirList);
+ 															pDiplo->setTheirOfferList(ourList);
+-															gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++															AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 															abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 														}
+ 													}
+@@ -11881,7 +11938,7 @@ void CvPlayerAI::AI_doDiplo()
+ 										}
+ 									}
+ 
+-									if (!(GET_PLAYER((PlayerTypes)iI).isHuman()) || (GET_TEAM(getTeam()).getLeaderID() == getID()))
++									if (!(GET_PLAYER((PlayerTypes)iI).isHumanOrClaude()) || (GET_TEAM(getTeam()).getLeaderID() == getID()))
+ 									{
+ 										if (AI_getContactTimer(((PlayerTypes)iI), CONTACT_TRADE_TECH) == 0)
+ 										{
+@@ -11980,7 +12037,7 @@ void CvPlayerAI::AI_doDiplo()
+ 														}
+ 													}
+ 
+-													if (!(GET_PLAYER((PlayerTypes)iI).isHuman()) || (iOurValue >= iTheirValue))
++													if (!(GET_PLAYER((PlayerTypes)iI).isHumanOrClaude()) || (iOurValue >= iTheirValue))
+ 													{
+ 														if ((iOurValue > ((iTheirValue * 2) / 3)) && (iTheirValue > ((iOurValue * 2) / 3)))
+ 														{
+@@ -12008,7 +12065,7 @@ void CvPlayerAI::AI_doDiplo()
+ 																theirList.insertAtEnd(item);
+ 															}
+ 
+-															if (GET_PLAYER((PlayerTypes)iI).isHuman())
++															if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude())
+ 															{
+ 																if (!(abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()]))
+ 																{
+@@ -12019,7 +12076,7 @@ void CvPlayerAI::AI_doDiplo()
+ 																	pDiplo->setAIContact(true);
+ 																	pDiplo->setOurOfferList(theirList);
+ 																	pDiplo->setTheirOfferList(ourList);
+-																	gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++																	AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 																	abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 																}
+ 															}
+@@ -12098,7 +12155,7 @@ void CvPlayerAI::AI_doDiplo()
+ 
+ 												if (eBestGiveBonus != NO_BONUS)
+ 												{
+-													if (!(GET_PLAYER((PlayerTypes)iI).isHuman()) || (AI_bonusTradeVal(eBestReceiveBonus, ((PlayerTypes)iI), -1) >= GET_PLAYER((PlayerTypes)iI).AI_bonusTradeVal(eBestGiveBonus, getID(), 1)))
++													if (!(GET_PLAYER((PlayerTypes)iI).isHumanOrClaude()) || (AI_bonusTradeVal(eBestReceiveBonus, ((PlayerTypes)iI), -1) >= GET_PLAYER((PlayerTypes)iI).AI_bonusTradeVal(eBestGiveBonus, getID(), 1)))
+ 													{
+ 														ourList.clear();
+ 														theirList.clear();
+@@ -12109,7 +12166,7 @@ void CvPlayerAI::AI_doDiplo()
+ 														setTradeItem(&item, TRADE_RESOURCES, eBestReceiveBonus);
+ 														theirList.insertAtEnd(item);
+ 
+-														if (GET_PLAYER((PlayerTypes)iI).isHuman())
++														if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude())
+ 														{
+ 															if (!(abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()]))
+ 															{
+@@ -12120,7 +12177,7 @@ void CvPlayerAI::AI_doDiplo()
+ 																pDiplo->setAIContact(true);
+ 																pDiplo->setOurOfferList(theirList);
+ 																pDiplo->setTheirOfferList(ourList);
+-																gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++																AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 																abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 															}
+ 														}
+@@ -12142,7 +12199,7 @@ void CvPlayerAI::AI_doDiplo()
+ 
+ 											if (GET_PLAYER((PlayerTypes)iI).canTradeItem(getID(), item, true) && canTradeItem(((PlayerTypes)iI), item, true))
+ 											{
+-												if (!(GET_PLAYER((PlayerTypes)iI).isHuman()) || (GET_TEAM(getTeam()).AI_mapTradeVal(GET_PLAYER((PlayerTypes)iI).getTeam()) >= GET_TEAM(GET_PLAYER((PlayerTypes)iI).getTeam()).AI_mapTradeVal(getTeam())))
++												if (!(GET_PLAYER((PlayerTypes)iI).isHumanOrClaude()) || (GET_TEAM(getTeam()).AI_mapTradeVal(GET_PLAYER((PlayerTypes)iI).getTeam()) >= GET_TEAM(GET_PLAYER((PlayerTypes)iI).getTeam()).AI_mapTradeVal(getTeam())))
+ 												{
+ 													ourList.clear();
+ 													theirList.clear();
+@@ -12153,7 +12210,7 @@ void CvPlayerAI::AI_doDiplo()
+ 													setTradeItem(&item, TRADE_MAPS);
+ 													theirList.insertAtEnd(item);
+ 
+-													if (GET_PLAYER((PlayerTypes)iI).isHuman())
++													if (GET_PLAYER((PlayerTypes)iI).isHumanOrClaude())
+ 													{
+ 														if (!(abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()]))
+ 														{
+@@ -12164,7 +12221,7 @@ void CvPlayerAI::AI_doDiplo()
+ 															pDiplo->setAIContact(true);
+ 															pDiplo->setOurOfferList(theirList);
+ 															pDiplo->setTheirOfferList(ourList);
+-															gDLL->beginDiplomacy(pDiplo, (PlayerTypes)iI);
++															AI_beginDiplomacy(pDiplo, (PlayerTypes)iI);
+ 															abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()] = true;
+ 														}
+ 													}
+@@ -12177,7 +12234,7 @@ void CvPlayerAI::AI_doDiplo()
+ 										}
+ 									}
+ 
+-									if (!(GET_PLAYER((PlayerTypes)iI).isHuman()) || !(abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()]))
++									if (!(GET_PLAYER((PlayerTypes)iI).isHumanOrClaude()) || !(abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()]))
+ 									{
+ 										int iDeclareWarTradeRand = GC.getLeaderHeadInfo(getPersonalityType()).getDeclareWarTradeRand();
+ 										int iMinAtWarCounter = MAX_INT;
+diff --git a/CvPlayerAI.h b/CvPlayerAI.h
+index 752dc91..769425c 100644
+--- a/CvPlayerAI.h
++++ b/CvPlayerAI.h
+@@ -403,6 +403,7 @@ protected:
+ 	void AI_doCivics();
+ 	void AI_doReligion();
+ 	void AI_doDiplo();
++	void AI_beginDiplomacy(CvDiploParameters* pDiplo, PlayerTypes ePlayer);	// CIVAI
+ 	void AI_doSplit();
+ 	void AI_doCheckFinancialTrouble();
+ 	
+diff --git a/CvTeam.cpp b/CvTeam.cpp
+index 0aaea9a..5af2fe7 100644
+--- a/CvTeam.cpp
++++ b/CvTeam.cpp
+@@ -2489,6 +2489,23 @@ bool CvTeam::isHuman() const
+ }
+ 
+ 
++bool CvTeam::isClaude() const
++{
++	for (int iI = 0; iI < MAX_PLAYERS; iI++)
++	{
++		if (GET_PLAYER((PlayerTypes)iI).getTeam() == getID() && GET_PLAYER((PlayerTypes)iI).isClaude())
++		{
++			return true;
++		}
++	}
++	return false;
++}
++
++bool CvTeam::isHumanOrClaude() const
++{
++	return isHuman() || isClaude();
++}
++
+ bool CvTeam::isBarbarian() const
+ {
+ 	return (getID() == BARBARIAN_TEAM);
+diff --git a/CvTeam.h b/CvTeam.h
+index 0286fad..352c649 100644
+--- a/CvTeam.h
++++ b/CvTeam.h
+@@ -91,6 +91,8 @@ public:
+ 	bool hasBonus(BonusTypes eBonus) const;
+ 	bool isBonusObsolete(BonusTypes eBonus) const;
+ 
++	bool isClaude() const;	// CIVAI: a member civ is decided by Claude	// Exposed to Python
++	bool isHumanOrClaude() const;
+ 	bool isHuman() const;																																// Exposed to Python
+ 	bool isBarbarian() const;																														// Exposed to Python
+ 	bool isMinorCiv() const;																														// Exposed to Python
+diff --git a/CvTeamAI.cpp b/CvTeamAI.cpp
+index 6189569..49adc18 100644
+--- a/CvTeamAI.cpp
++++ b/CvTeamAI.cpp
+@@ -137,7 +137,7 @@ void CvTeamAI::AI_doTurnPre()
+ {
+ 	AI_doCounter();
+ 
+-	if (isHuman())
++	if (isHuman() || isClaude())	// CIVAI: war and peace are Claude's
+ 	{
+ 		return;
+ 	}
+@@ -160,7 +160,7 @@ void CvTeamAI::AI_doTurnPost()
+ 
+ 	AI_updateAreaStragies(false);
+ 
+-	if (isHuman())
++	if (isHuman() || isClaude())	// CIVAI: war and peace are Claude's
+ 	{
+ 		return;
+ 	}
+@@ -3323,7 +3323,7 @@ void CvTeamAI::AI_doWar()
+ 				{
+ 					if (iI != getID())
+ 					{
+-						if (!(GET_TEAM((TeamTypes)iI).isHuman()))
++						if (!(GET_TEAM((TeamTypes)iI).isHumanOrClaude()))	// CIVAI: Claude's team is asked, like a human's
+ 						{
+ 							if (canContact((TeamTypes)iI))
+ 							{
+diff --git a/CvUnitAI.cpp b/CvUnitAI.cpp
+index 99edb5d..2cc05ef 100644
+--- a/CvUnitAI.cpp
++++ b/CvUnitAI.cpp
+@@ -443,6 +443,17 @@ bool CvUnitAI::AI_follow()
+ 
+ // XXX what if a unit gets stuck b/c of it's UnitAIType???
+ // XXX is this function costing us a lot? (it's recursive...)
++// CIVAI: the built-in AI never disbands Claude's units, automated or not: the unit just waits
++void CvUnitAI::AI_scrapUnlessClaude()
++{
++	if (GET_PLAYER(getOwnerINLINE()).isClaude())
++	{
++		getGroup()->pushMission(MISSION_SKIP);
++		return;
++	}
++	scrap();
++}
++
+ void CvUnitAI::AI_upgrade()
+ {
+ 	PROFILE_FUNC();
+@@ -1150,7 +1161,7 @@ void CvUnitAI::AI_settleMove()
+ 			if (NULL == getTransportUnit())
+ 			{
+ 				//may seem wasteful, but settlers confuse the AI.
+-				scrap();
++				AI_scrapUnlessClaude();
+ 				return;
+ 			}
+ 		}
+@@ -1528,7 +1539,7 @@ void CvUnitAI::AI_workerMove()
+ 			{
+ 				if (GET_PLAYER(getOwnerINLINE()).calculateUnitCost() > 0)
+ 				{
+-					scrap();
++					AI_scrapUnlessClaude();
+ 					return;
+ 				}
+ 			}
+@@ -3191,7 +3202,7 @@ void CvUnitAI::AI_exploreMove()
+ 		{
+ 			if (GET_PLAYER(getOwnerINLINE()).calculateUnitCost() > 0)
+ 			{
+-				scrap();
++				AI_scrapUnlessClaude();
+ 				return;
+ 			}
+ 		}
+@@ -4086,7 +4097,7 @@ void CvUnitAI::AI_workerSeaMove()
+ 					{
+ 						if (GET_PLAYER(getOwnerINLINE()).calculateUnitCost() > 0)
+ 						{
+-							scrap();
++							AI_scrapUnlessClaude();
+ 							return;
+ 						}
+ 					}
+@@ -4094,7 +4105,7 @@ void CvUnitAI::AI_workerSeaMove()
+ 				else
+ 				{
+ 					//Probably icelocked since it can't perform actions.
+-					scrap();
++					AI_scrapUnlessClaude();
+ 					return;
+ 				}	
+ 			}
+@@ -4633,7 +4644,7 @@ void CvUnitAI::AI_exploreSeaMove()
+ 				AI_setUnitAIType(UNITAI_RESERVE_SEA);
+ 				return;
+ 			}
+-			scrap();
++			AI_scrapUnlessClaude();
+ 		}		
+ 	}
+ 
+@@ -4698,7 +4709,7 @@ void CvUnitAI::AI_exploreSeaMove()
+ 			{
+ 				if (GET_PLAYER(getOwnerINLINE()).calculateUnitCost() > 0)
+ 				{
+-					scrap();
++					AI_scrapUnlessClaude();
+ 					return;
+ 				}
+ 			}
+diff --git a/CvUnitAI.h b/CvUnitAI.h
+index 39c8e1b..747ee99 100644
+--- a/CvUnitAI.h
++++ b/CvUnitAI.h
+@@ -25,6 +25,7 @@ public:
+ 	bool AI_follow();
+ 
+ 	void AI_upgrade();
++	void AI_scrapUnlessClaude();	// CIVAI
+ 
+ 	void AI_promote();
+ 
+diff --git a/CyPlayer.cpp b/CyPlayer.cpp
+index 909d09e..cfa1389 100644
+--- a/CyPlayer.cpp
++++ b/CyPlayer.cpp
+@@ -96,6 +96,73 @@ bool CyPlayer::isHuman()
+ 	return m_pPlayer ? m_pPlayer->isHuman() : false;
+ }
+ 
++bool CyPlayer::isClaude()
++{
++	return m_pPlayer ? m_pPlayer->isClaude() : false;
++}
++
++void CyPlayer::handleDiploEvent(int /*DiploEventTypes*/ eDiploEvent, int /*PlayerTypes*/ ePlayer, int iData1, int iData2)
++{
++	// CIVAI: Claude's answer to this AI's request, with the same effects as a human's answer on the screen
++	if (m_pPlayer)
++		m_pPlayer->handleDiploEvent((DiploEventTypes)eDiploEvent, (PlayerTypes)ePlayer, iData1, iData2);
++}
++
++// CIVAI: deals in text form, "item:data,item:data" (TradeableItems numbers), judged and run by the game's own code
++static void claudeParseTrades(const std::string& szText, CLinkList<TradeData>& list)
++{
++	const char* p = szText.c_str();
++	while (*p)
++	{
++		int iItem, iData, n = 0;
++		if (sscanf(p, "%d:%d%n", &iItem, &iData, &n) != 2)
++		{
++			break;
++		}
++		TradeData item;
++		setTradeItem(&item, (TradeableItems)iItem, iData);
++		list.insertAtEnd(item);
++		p += n;
++		if (*p == ',')
++		{
++			p++;
++		}
++	}
++}
++
++// this AI's answer to ePlayer offering szTheirs for szOurs (the game's CvPlayerAI::AI_considerOffer)
++bool CyPlayer::AI_considerOfferText(int /*PlayerTypes*/ ePlayer, std::string szTheirs, std::string szOurs)
++{
++	if (!m_pPlayer)
++		return false;
++	CLinkList<TradeData> theirList;
++	CLinkList<TradeData> ourList;
++	claudeParseTrades(szTheirs, theirList);
++	claudeParseTrades(szOurs, ourList);
++	return m_pPlayer->AI_considerOffer((PlayerTypes)ePlayer, &theirList, &ourList);
++}
++
++// the deal "we give szOurs, eOther gives szTheirs", made by the game's CvGame::implementDeal (items checked)
++bool CyPlayer::implementDealText(int /*PlayerTypes*/ eOther, std::string szOurs, std::string szTheirs)
++{
++	if (!m_pPlayer)
++		return false;
++	CLinkList<TradeData> ourList;
++	CLinkList<TradeData> theirList;
++	claudeParseTrades(szOurs, ourList);
++	claudeParseTrades(szTheirs, theirList);
++	if (ourList.getLength() == 0 && theirList.getLength() == 0)
++		return false;
++	GC.getGameINLINE().implementDeal(m_pPlayer->getID(), (PlayerTypes)eOther, &ourList, &theirList);
++	return true;
++}
++
++void CyPlayer::setClaude(bool bNewValue)
++{
++	if (m_pPlayer)
++		m_pPlayer->setClaude(bNewValue);
++}
++
+ bool CyPlayer::isBarbarian()
+ {
+ 	return m_pPlayer ? m_pPlayer->isBarbarian() : false;
+diff --git a/CyPlayer.h b/CyPlayer.h
+index 64b12a7..c3682ee 100644
+--- a/CyPlayer.h
++++ b/CyPlayer.h
+@@ -40,6 +40,11 @@ public:
+ 	void killUnits();
+ 	bool hasTrait(int /*TraitTypes*/ iIndex);
+ 	bool isHuman();
++	bool isClaude();
++	bool AI_considerOfferText(int /*PlayerTypes*/ ePlayer, std::string szTheirs, std::string szOurs);
++	bool implementDealText(int /*PlayerTypes*/ eOther, std::string szOurs, std::string szTheirs);
++	void handleDiploEvent(int /*DiploEventTypes*/ eDiploEvent, int /*PlayerTypes*/ ePlayer, int iData1, int iData2);
++	void setClaude(bool bNewValue);
+ 	bool isBarbarian();
+ 	std::wstring getName();
+ 	std::wstring getNameForm(int iForm);
+diff --git a/CyPlayerInterface1.cpp b/CyPlayerInterface1.cpp
+index 491771e..8658e97 100644
+--- a/CyPlayerInterface1.cpp
++++ b/CyPlayerInterface1.cpp
+@@ -38,6 +38,11 @@ void CyPlayerPythonInterface1(python::class_<CyPlayer>& x)
+ 		.def("killUnits", &CyPlayer::killUnits, "void ()")
+ 		.def("hasTrait", &CyPlayer::hasTrait, "bool hasTrait(int /*TraitTypes*/ iIndex) - returns True if player is the Trait Type.")
+ 		.def("isHuman", &CyPlayer::isHuman, "bool ()")
++		.def("isClaude", &CyPlayer::isClaude, "bool () - CIVAI: decided by Claude, not the built-in AI")
++		.def("AI_considerOfferText", &CyPlayer::AI_considerOfferText, "bool (int ePlayer, str theirs, str ours) - CIVAI: this AI's answer to an offer, items as 'item:data,...'")
++		.def("implementDealText", &CyPlayer::implementDealText, "bool (int eOther, str ours, str theirs) - CIVAI: make a deal with the game's own code")
++		.def("handleDiploEvent", &CyPlayer::handleDiploEvent, "void (int eDiploEvent, int ePlayer, int iData1, int iData2) - CIVAI: answer this AI's request for ePlayer, as on the diplomacy screen")
++		.def("setClaude", &CyPlayer::setClaude, "void (bool) - CIVAI: hand this civ to Claude (not saved; set after every load)")
+ 		.def("isBarbarian", &CyPlayer::isBarbarian, "bool () - returns True if player is a Barbarian")
+ 		.def("getName", &CyPlayer::getName, "str ()")
+ 		.def("getNameForm", &CyPlayer::getNameForm, "str ()")
+diff --git a/CyTeam.cpp b/CyTeam.cpp
+index 1a09405..b09382a 100644
+--- a/CyTeam.cpp
++++ b/CyTeam.cpp
+@@ -218,6 +218,11 @@ bool CyTeam::isHuman()
+ 	return m_pTeam ? m_pTeam->isHuman() : false;
+ }
+ 
++bool CyTeam::isClaude()
++{
++	return m_pTeam ? m_pTeam->isClaude() : false;
++}
++
+ bool CyTeam::isBarbarian()
+ {
+ 	return m_pTeam ? m_pTeam->isBarbarian() : false;
+diff --git a/CyTeam.h b/CyTeam.h
+index 4d999fa..79a2358 100644
+--- a/CyTeam.h
++++ b/CyTeam.h
+@@ -68,6 +68,7 @@ public:
+ 	bool hasHeadquarters(int /*CorporationTypes*/ eCorporation);
+ 
+ 	bool isHuman();
++	bool isClaude();
+ 	bool isBarbarian();
+ 	bool isMinorCiv();
+ 	int /*PlayerTypes*/ getLeaderID();
+diff --git a/CyTeamInterface.cpp b/CyTeamInterface.cpp
+index 6d02951..668a51b 100644
+--- a/CyTeamInterface.cpp
++++ b/CyTeamInterface.cpp
+@@ -62,6 +62,7 @@ void CyTeamPythonInterface()
+ 		.def("hasHeadquarters", &CyTeam::hasHeadquarters, "bool (int (CorporationTypes) eCorporation) - does this team have eCorporation's headquarters?")
+ 
+ 		.def("isHuman", &CyTeam::isHuman, "bool () - is human team?")
++		.def("isClaude", &CyTeam::isClaude, "bool () - CIVAI: a member civ is decided by Claude")
+ 		.def("isBarbarian", &CyTeam::isBarbarian, "bool () - is barbarian team?")
+ 		.def("isMinorCiv", &CyTeam::isMinorCiv)
+ 		.def("getLeaderID", &CyTeam::getLeaderID, "int (PlayerTypes) ()")
