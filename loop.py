@@ -108,7 +108,7 @@ def brief(events, chat, reasons):
     parts += recent_wakes(3) or ["(none)"]
     status = civ("status")
     parts += ambitions_note(status)
-    parts += ["", "## State now", "", status, "", civ("research"), "", civ("offers"), "",
+    parts += ["", "## State now", "", status, "", civ("research"), "", civ("proposals"), "", civ("offers"), "",
               "### Ongoing deals", "", civ("deals"), "", "### Budget", "", civ("budget"), "", civ("gate")]
     parts += ["", "## Map of my land", "", my_land_map()]
     return "\n".join(parts)
@@ -190,7 +190,8 @@ def run_agent(cfg, prompt):
     stdin = None if any("{prompt}" in a for a in cfg["agent"]) else prompt
     t0 = time.time()
     try:
-        r = subprocess.run(cmd, input=stdin, capture_output=True, text=True, cwd=HERE,
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CIV_") or k in ("CIV_BOTTLE", "CIV_GAME")}
+        r = subprocess.run(cmd, input=stdin, capture_output=True, text=True, cwd=HERE, env=env,
                            timeout=cfg.get("timeout_minutes", 15) * 60)
         out = r.stdout.strip() or r.stderr.strip()
     except subprocess.TimeoutExpired:

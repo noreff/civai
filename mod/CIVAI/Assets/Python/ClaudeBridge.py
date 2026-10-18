@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 47
+BRIDGE_VERSION = 48
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -97,6 +97,23 @@ def infoType(getter, i):
 # ------------------------------------------------------------ who is Claude
 
 g_acting = [None]   # player a request acts for ("player" in the request), else the default
+
+def configValue(key):
+	try:
+		if os.path.exists(CONFIG_FILE):
+			f = open(CONFIG_FILE, "r")
+			try:
+				for line in f.readlines():
+					if "=" in line and line.split("=")[0].strip() == key:
+						return line.split("=", 1)[1].strip()
+			finally:
+				f.close()
+	except:
+		pass
+	return None
+
+def multiAgent():
+	return (configValue("multi") or "").lower() in ("yes", "1", "true")
 
 def getClaudePlayer():
 	# the request's own player if it names one; else config.txt "player = N";
@@ -859,6 +876,10 @@ def recordEvent(tag, a):
 		frm, to, comment, data, gives, wants = engineArgs(a)
 		if to == iMe:
 			newProposal(frm, commentName(comment), data, fromEngineText(gives), fromEngineText(wants))
+	elif tag == "claudeVote":
+		me, voteId, source, vote, player, cityId, other, text = engineArgs(a)
+		if me == iMe:
+			newVote(me, voteId, source, vote, player, cityId, other, u"%s" % text)
 	elif tag == "claudeOffered":
 		frm, to, change, gives, wants = engineArgs(a)
 		if to == iMe:
@@ -869,7 +890,15 @@ def recordEvent(tag, a):
 		undoHurry(a[0], int(a[1]))
 	elif tag == "unitKilled" and a[0].getOwner() == iMe:
 		g_killed[a[0].getID()] = True   # a real death (combat, capture); the game reports it only then
-	elif tag == "unitLost" and a[0].getOwner() == iMe and not engineControl():
+	elif tag == "unitLost" and a[0].getOwner() == iMe and engineControl():
+		u = a[0]
+		if g_killed.has_key(u.getID()):
+			del g_killed[u.getID()]
+		elif g_window[0] == ("own", iMe):
+			# gone in our own between-turns processing with nobody killing it: unpaid units deserting
+			writeEvent("unit_disbanded", {"unit": gc.getUnitInfo(u.getUnitType()).getDescription(), "id": u.getID(),
+				"why": "lost at turn end: the treasury was empty and unpaid units desert (the game's rule)"})
+	elif tag == "unitLost" and a[0].getOwner() == iMe:
 		unitGone(a[0])
 	elif tag == "greatPersonBorn" and a[1] == iMe:
 		writeEvent("great_person", {"unit": gc.getUnitInfo(a[0].getUnitType()).getType(), "city": a[2].getName(),
@@ -1475,6 +1504,11 @@ def guardChoices(force=False):
 	p = gc.getPlayer(getClaudePlayer())
 	if not p.isAlive():
 		return
+	if engineControl():
+		# the engine keeps the built-in AI out: civics, religion and budget change only by Claude's
+		# choice or by the game's rules (answers, deals, votes); only build lists need putting back
+		restoreCityQueues(p)
+		return
 	want = loadChoices()
 	now = currentChoices(p)
 	if want is None:
@@ -1799,7 +1833,12 @@ def cmdBudget(args):
 
 def doGoldHook(gu, argsList):
 	try:
-		if argsList[0] == getClaudePlayer():
+		if argsList[0] == getClaudePlayer() and engineControl():
+			p = gc.getPlayer(argsList[0])
+			if p.getGold() + p.calculateGoldRate() < 0:
+				writeEvent("treasury_empty", {"gold": p.getGold(), "per_turn": p.calculateGoldRate(),
+					"note": "the treasury runs dry this turn: research stalls and unpaid units desert (raise gold in civ budget)"})
+		elif argsList[0] == getClaudePlayer():
 			p = gc.getPlayer(argsList[0])
 			want = (loadChoices() or {}).get("budget")
 			if want and want != budgetNow(p):
@@ -2671,7 +2710,7 @@ def engineControl():
 
 def ensureEngineControl():
 	iMe = getClaudePlayer()
-	if iMe < 0 or not engineReady():
+	if configValue("player") is None or iMe < 0 or not engineReady():
 		g_engineOn[0] = False
 		return
 	p = gc.getPlayer(iMe)
@@ -2713,6 +2752,8 @@ ANSWERS = {
 TRADES = ("offer_deal", "offer_peace", "offer_city", "offer_vassal", "give_help", "screen_offer")
 
 def proposalText(v):
+	if v["comment"] == "vote":
+		return voteText(v)
 	who = pname(v["from"])
 	gives = ", ".join([itemText(tuple(x)) for x in v["gives"]]) or "nothing"
 	wants = ", ".join([itemText(tuple(x)) for x in v["wants"]]) or "nothing"
@@ -2743,6 +2784,8 @@ def proposalText(v):
 	return "%s says something (%s)" % (who, c)
 
 def newProposal(frm, comment, data, gives, wants):
+	gives = [list(x) for x in gives]   # stored as JSON lists: compare in the same form
+	wants = [list(x) for x in wants]
 	o = loadProposals()
 	for k, v in o["open"].items():
 		if v["from"] == frm and v["comment"] == comment and v["gives"] == gives and v["wants"] == wants:
@@ -2771,9 +2814,21 @@ def answerProposal(n, yes, why=None):
 	wants = [tuple(x) for x in v["wants"]]
 	c = v["comment"]
 	done = []
+	if c == "vote":
+		return answerVote(o, n, v, why)
+	if yes and (gives or wants) and c in TRADES and c != "screen_offer" and not ai.isHuman():
+		# a turn may have passed: the AI must still want it (its own judgment, as when it proposed)
+		if not ai.AI_considerOfferText(iMe, engineText(wants), engineText(gives)):
+			yes = False
+			why = "%s no longer agrees to it" % pname(v["from"])
+			done.append(why)
 	if yes and (gives or wants):
 		executeDeal(v["from"], iMe, gives, wants)
 		done.append("deal made")
+	if ai.isHuman() and why != "no answer in time":
+		CyInterface().addMessage(v["from"], True, gc.getEVENT_MESSAGE_TIME() * 3,
+			u"<font=4><color=255,200,60,255>%s %s your offer.</color></font>" % (gc.getPlayer(iMe).getName(),
+			(yes and "accepts") or "declines"), "", InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
 	if ANSWERS.has_key(c) and not ai.isHuman():
 		ev = getattr(DiploEventTypes, ANSWERS[c][not yes and 1 or 0])
 		ai.handleDiploEvent(ev, iMe, v.get("data", -1), -1)
@@ -2788,11 +2843,52 @@ def answerProposal(n, yes, why=None):
 		"result": done, "why": why})
 	return {"id": int(n), "answer": yes and "yes" or "no", "result": done or ["nothing changes"]}
 
+def newVote(me, voteId, source, vote, player, cityId, other, text):
+	o = loadProposals()
+	for k, v in o["open"].items():
+		if v["comment"] == "vote" and v["data"] == voteId:
+			return
+	info = gc.getVoteInfo(vote)
+	v = {"from": me, "comment": "vote", "data": voteId, "gives": [], "wants": [], "turn": gc.getGame().getGameTurn(),
+		"source": gc.getVoteSourceInfo(source).getDescription(), "text": text,
+		"election": bool(info.isSecretaryGeneral() or info.isVictory())}
+	n = o["next"]
+	o["next"] = n + 1
+	o["open"][str(n)] = v
+	saveProposals(o)
+	writeEvent("proposal", {"id": n, "text": voteText(v), "answer": voteHow(n, v)})
+
+def voteText(v):
+	return "%s vote: %s" % (v["source"], v["text"])
+
+def voteHow(n, v):
+	if v["election"]:
+		return "civ answer %d <leader to vote for> (or abstain); open until the vote is counted" % n
+	return "civ answer %d yes|no|abstain; open until the vote is counted" % n
+
+def answerVote(o, n, v, why):
+	iMe = getClaudePlayer()
+	a = (why or "").strip().lower()
+	if v["election"] and a not in ("abstain", "", "no answer in time"):
+		choice = gc.getPlayer(findPlayer(a)).getTeam()   # an election counts votes per team
+	else:
+		choice = {"yes": PlayerVoteTypes.PLAYER_VOTE_YES, "no": PlayerVoteTypes.PLAYER_VOTE_NO}.get(a, PlayerVoteTypes.PLAYER_VOTE_ABSTAIN)
+	gc.getGame().castVote(iMe, v["data"], choice)
+	del o["open"][str(n)]
+	saveProposals(o)
+	writeEvent("proposal_answered", {"id": int(n), "answer": a or "abstain", "what": voteText(v)})
+	return {"id": int(n), "voted": a or "abstain", "vote": voteText(v)}
+
 def expireProposals():
 	# a human must answer on the screen at once; Claude has until his next turn ends
 	now = gc.getGame().getGameTurn()
 	o = loadProposals()
 	for k, v in o["open"].items():
+		if v["comment"] == "vote":
+			if v["turn"] < now - 2:   # counted by now; a late vote would not count
+				del o["open"][k]
+				saveProposals(o)
+			continue
 		if v["turn"] < now:
 			try:
 				answerProposal(k, False, "no answer in time")
@@ -2805,7 +2901,12 @@ def cmdProposals(args):
 		"answer": "civ answer N yes|no"}
 
 def cmdAnswer(args):
-	return answerProposal(str(args["id"]).lstrip("#"), args["answer"].lower() in ("yes", "y", "accept", "ok"))
+	n = str(args["id"]).lstrip("#")
+	a = args["answer"]
+	v = loadProposals()["open"].get(n)
+	if v is not None and v["comment"] == "vote":
+		return answerProposal(n, True, a)
+	return answerProposal(n, a.lower() in ("yes", "y", "accept", "ok"))
 
 def engineArgs(a):
 	if len(a) == 1 and type(a[0]) == type(()):
@@ -3291,7 +3392,7 @@ def setReady(byWhom):
 
 ATTENTION_KINDS = ("first_contact", "war_declared", "peace_made", "city_founded", "city_changed_hands",
 	"city_razed", "combat", "tech_learned", "building_built", "project_built", "religion_founded",
-	"great_person", "golden_age", "unit_arrived", "unit_done", "deal_done", "deal_declined", "deal_failed", "native_deal", "unit_disbanded", "proposal", "diplomacy",
+	"great_person", "golden_age", "unit_arrived", "unit_done", "deal_done", "deal_declined", "deal_failed", "native_deal", "unit_disbanded", "proposal", "diplomacy", "treasury_empty",
 	"unit_waiting", "city_queue_done", "deal_ended", "budget_suspended")
 
 def noteAttention(kind):
@@ -3513,6 +3614,9 @@ def handleRequest(name):
 		if req.get("player") is not None:
 			if gc.getPlayer(int(req["player"])).isHuman():
 				raise Exception("player %s is a human: agents can only act for AI-controlled civs" % req["player"])
+			if int(req["player"]) != getClaudePlayer() and not multiAgent():
+				writeEvent("fair_play_alert", {"what": "a request tried to act for player %s" % req["player"], "cmd": cmd})
+				raise Exception("acting for another civ is only allowed in multi-agent games (config.txt: multi = yes)")
 			g_acting[0] = int(req["player"])
 		if cmd == "exec":
 			cmdExecGuard(req.get("args") or {}, req)
