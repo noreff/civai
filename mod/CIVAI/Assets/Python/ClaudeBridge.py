@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 63
+BRIDGE_VERSION = 64
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -114,6 +114,54 @@ def configValue(key):
 
 def multiAgent():
 	return (configValue("multi") or "").lower() in ("yes", "1", "true")
+
+# ------------------------------------------------------------ seats (several agents in one game)
+#
+# config.txt "players = 1,2,3": each agent civ is a seat with its own files in claude_bridge\p<N>
+# (events, chat, gate, proposals, offers, claims...). Every request and every game event is handled
+# once per seat with that seat's files swapped in, so the code below only ever sees its own player.
+# Without "players" (one agent, the original layout) the files stay in claude_bridge itself.
+SEAT_FILES = ("EVENTS_FILE", "CLAIMS_FILE", "CHAT_FILE", "CHOICES_FILE", "SEAL_FILE", "OFFERS_FILE",
+	"PROPOSALS_FILE", "CITY_CLAIMS_FILE", "GATE_FILE")
+g_seatBase = {}
+
+def seatsConfigured():
+	return bool(configValue("players"))
+
+def agentPlayers():
+	v = configValue("players")
+	if v:
+		return [int(x) for x in v.split(",") if x.strip()]
+	p = getClaudePlayer()
+	return p >= 0 and [p] or []
+
+def seatDir(p):
+	if p is None or not seatsConfigured():
+		return OUT_DIR
+	return OUT_DIR + "\\p%d" % p
+
+def actAs(p):
+	# swap in player p's files (None: the default seat); returns the previous player
+	if not g_seatBase:
+		for name in SEAT_FILES:
+			g_seatBase[name] = globals()[name].split("\\")[-1]
+	prev = g_acting[0]
+	g_acting[0] = p
+	d = seatDir(p)
+	if d != OUT_DIR and not os.path.isdir(d):
+		os.makedirs(d)
+	for name, base in g_seatBase.items():
+		globals()[name] = d + "\\" + base
+	return prev
+
+def forEachSeat(fn, *args):
+	# run fn once per agent civ, each time with that seat's files
+	for p in agentPlayers():
+		prev = actAs(p)
+		try:
+			fn(*args)
+		finally:
+			actAs(prev)
 
 def getClaudePlayer():
 	# the request's own player if it names one; else config.txt "player = N";
@@ -994,7 +1042,10 @@ def recordEvent(tag, a):
 
 def safeRecordEvent(tag, args):
 	try:
-		recordEvent(tag, args)
+		if seatsConfigured():
+			forEachSeat(recordEvent, tag, args)
+		else:
+			recordEvent(tag, args)
 	except:
 		log("event %s FAILED:\n%s" % (tag, "".join(traceback.format_exception(*sys.exc_info()))))
 
@@ -1212,14 +1263,55 @@ def leaderTitle():
 	p = gc.getPlayer(getClaudePlayer())
 	return u"%s of %s" % (p.getName(), p.getCivilizationShortDescription(0))
 
-def writeChat(who, text):
+def writeChat(who, text, to=None):
+	# one line in the acting seat's chat (who: "claude" = this seat, "player" = the human, else a leader's name)
 	ensureDir()
+	row = {"from": who, "text": text, "turn": gc.getGame().getGameTurn(), "time": time.strftime("%H:%M:%S")}
+	if to is not None:
+		row["to"] = to
 	f = open(CHAT_FILE, "ab")
 	try:
-		f.write(toJson({"from": who, "text": text, "turn": gc.getGame().getGameTurn(),
-			"time": time.strftime("%H:%M:%S")}) + "\n")
+		f.write(toJson(row) + "\n")
 	finally:
 		f.close()
+
+def appendLine(path, row):
+	ensureDir()
+	f = open(path, "ab")
+	try:
+		f.write(toJson(row) + "\n")
+	finally:
+		f.close()
+
+def deliverChat(frm, text, to):
+	"""Several agents: a message from seat frm to everyone (to=None, public) or to one player (private).
+	Each seat's chat holds only what that seat may read; chat_all.jsonl (the director's and the video's)
+	holds everything."""
+	turn = gc.getGame().getGameTurn()
+	full = lambda i: "%s (%s)" % (gc.getPlayer(i).getName(), gc.getPlayer(i).getCivilizationShortDescription(0))
+	appendLine(OUT_DIR + "\\chat_all.jsonl", {"from": full(frm), "from_id": frm,
+		"to": to is None and "all" or full(to), "to_id": to, "text": text, "turn": turn, "time": time.strftime("%H:%M:%S")})
+	# like the game's own diplomacy: only leaders who have met the speaker hear him
+	met = lambda i: i == frm or gc.getTeam(gc.getPlayer(i).getTeam()).isHasMet(gc.getPlayer(frm).getTeam())
+	readers = [x for x in agentPlayers() if met(x)]
+	if to is not None:
+		readers = [x for x in readers if x in (frm, to)]
+	for r in readers:
+		prev = actAs(r)
+		try:
+			if r == frm:
+				writeChat("claude", text, to is None and "all" or pname(to))
+			else:
+				writeChat(pname(frm), text, to is None and "all" or "you")
+				writeEvent("message_from_leader", {"from": pname(frm), "text": text, "private": to is not None})
+		finally:
+			actAs(prev)
+	# the screen (a human player or the spectator) shows every line: the video sees all channels
+	head = to is None and u"%s to all" % full(frm) or u"%s \u2192 %s" % (full(frm), full(to))
+	line = u"<font=3><color=255,200,60,255>[%s]:  %s</color></font>" % (head, text)
+	for i in humanPlayers():
+		CyInterface().addMessage(i, True, gc.getEVENT_MESSAGE_TIME() * 3, line, "",
+			InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
 
 def chatBegin(argsList=-1):
 	import Popup as PyPopup
@@ -1290,8 +1382,19 @@ def installPatches():
 	log("hooks installed: chat, unit claims, city claims, diplomacy, war, budget, razing, turn gate")
 
 def cmdSay(args):
-	# a chat line in the game's chat log (like a human opponent), or a popup with popup=true
+	# a chat line in the game's chat log (like a human opponent), or a popup with popup=true;
+	# in a game of several agents: to everyone, or privately to one leader ("to")
 	text = args["text"]
+	if seatsConfigured():
+		to = None
+		if args.get("to"):
+			to = findPlayer(args["to"])
+			if to == getClaudePlayer():
+				raise Exception("that is you")
+			if not gc.getTeam(gc.getPlayer(getClaudePlayer()).getTeam()).isHasMet(gc.getPlayer(to).getTeam()):
+				raise Exception("you have not met %s yet" % args["to"])
+		deliverChat(getClaudePlayer(), text, to)
+		return {"shown": True, "to": to is None and "all" or pname(to)}
 	me = gc.getPlayer(getClaudePlayer())
 	if args.get("popup"):
 		import Popup as PyPopup
@@ -2837,7 +2940,7 @@ def engineControl():
 
 def ensureEngineControl():
 	iMe = getClaudePlayer()
-	if configValue("player") is None or iMe < 0 or not engineReady():
+	if (configValue("player") is None and not seatsConfigured()) or iMe < 0 or not engineReady():
 		g_engineOn[0] = False
 		return
 	p = gc.getPlayer(iMe)
@@ -3944,21 +4047,42 @@ def handleRequest(name):
 		if req.get("player") is not None:
 			if gc.getPlayer(int(req["player"])).isHuman():
 				raise Exception("player %s is a human: agents can only act for AI-controlled civs" % req["player"])
-			if int(req["player"]) != getClaudePlayer() and not multiAgent():
+			if int(req["player"]) != getClaudePlayer() and not multiAgent() and not seatsConfigured():
 				writeEvent("fair_play_alert", {"what": "a request tried to act for player %s" % req["player"], "cmd": cmd})
 				raise Exception("acting for another civ is only allowed in multi-agent games (config.txt: multi = yes)")
-			g_acting[0] = int(req["player"])
+			if seatsConfigured() and int(req["player"]) not in agentPlayers():
+				raise Exception("player %s is not one of this game's agents" % req["player"])
+		elif seatsConfigured() and cmd not in ("ping", "exec"):
+			raise Exception("this game has several agents: the request must name its player (CIV_PLAYER)")
+		seat = None
+		if req.get("player") is not None:
+			seat = int(req["player"])   # player 0 is a seat too, so no "x and y or z" here
+		prev = actAs(seat)
 		if cmd == "exec":
 			cmdExecGuard(req.get("args") or {}, req)
 		try:
 			reply = {"id": rid, "ok": True, "result": COMMANDS[cmd](req.get("args") or {})}
 		finally:
-			g_acting[0] = None
+			actAs(prev)
 	except:
 		reply = {"id": rid, "ok": False,
 			"error": "".join(traceback.format_exception(*sys.exc_info()))}
 	writeAtomic(REPLY_DIR + "\\" + str(rid) + ".json", toJson(reply))
 	log("reply %s ok=%s" % (rid, reply["ok"]))
+
+def seatUpkeep(pending):
+	try:
+		ensureEngineControl()
+	except:
+		log("engine control FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
+	try:
+		guardChoices(pending)   # answers always see the state with the AI's moves undone
+	except:
+		log("choices guard FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
+	try:
+		checkpointTick()
+	except:
+		log("native deal check FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 
 def poll():
 	# throttled by the caller (frame counter); time.time() moves in 128 s steps in-game
@@ -3978,18 +4102,10 @@ def poll():
 			os.makedirs(REPLY_DIR)
 		names = [n for n in os.listdir(IN_DIR) if n.endswith(".json")]
 		if gameReady():
-			try:
-				ensureEngineControl()
-			except:
-				log("engine control FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
-			try:
-				guardChoices(bool(names))   # answers always see the state with the AI's moves undone
-			except:
-				log("choices guard FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
-			try:
-				checkpointTick()
-			except:
-				log("native deal check FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
+			if seatsConfigured():
+				forEachSeat(seatUpkeep, bool(names))
+			else:
+				seatUpkeep(bool(names))
 		names = [n for n in os.listdir(IN_DIR) if n.endswith(".json")]
 		names.sort()
 		for n in names:

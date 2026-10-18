@@ -90,6 +90,8 @@
   civ hold                 take "ready" back: the player must wait for the next `civ ready`
   civ say "<text>"         chat line to the player in the game, from Claude's leader
   civ say --popup "<text>" the same as a popup window
+  civ say --to <leader> "<text>"   (a game of several AI leaders) a private message only that leader
+                           reads; without --to every leader who has met you reads it
   civ chat [N]             last N chat messages both ways (default 20); works without the game
   civ director "<text>"    a note to the CIVAI director (not the game): a broken or missing tool,
                            something that looks wrong; answers come in director_notes.md.
@@ -111,6 +113,8 @@ import uuid
 
 BRIDGE = os.path.expanduser(
     "~/Library/Application Support/CrossOver/Bottles/%s/drive_c/claude_bridge" % os.environ.get("CIV_BOTTLE", "civ4"))
+# a game of several agents keeps each seat's events and chat in claude_bridge/p<N>
+SEAT = os.path.join(BRIDGE, "p%s" % os.environ["CIV_PLAYER"]) if os.environ.get("CIV_PLAYER") else BRIDGE
 IN_DIR = os.path.join(BRIDGE, "in")
 OUT_DIR = os.path.join(BRIDGE, "out")
 TIMEOUT = float(os.environ.get("CIV_TIMEOUT", "120"))
@@ -340,8 +344,8 @@ def units_one_per_line(s, players):
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 OUT = os.path.join(HERE, "out")
-EVENTS = os.path.join(BRIDGE, "events.jsonl")
-CHAT = os.path.join(BRIDGE, "chat.jsonl")
+EVENTS = os.path.join(SEAT if os.path.isdir(SEAT) else BRIDGE, "events.jsonl")
+CHAT = os.path.join(SEAT if os.path.isdir(SEAT) else BRIDGE, "chat.jsonl")
 # video logs: every command and every thought, with wall-clock time, for overlays in the edit
 def current_game():
     # games/CURRENT holds the id of the game being played; CIV_GAME overrides it
@@ -626,8 +630,11 @@ def main(argv):
             print(fmt_record(call("release", {"id": argv[1] if argv[1] == "all" else int(argv[1])})))
         elif cmd == "say":
             popup = len(argv) > 1 and argv[1] == "--popup"
-            text = " ".join(argv[2 if popup else 1:])
-            call("say", {"text": text, "popup": popup})
+            to = argv[2] if len(argv) > 2 and argv[1] == "--to" else None
+            text = " ".join(argv[3 if to else 2 if popup else 1:])
+            r = call("say", {"text": text, "popup": popup, "to": to})
+            if r.get("to"):
+                print("to %s:" % r["to"], end=" ")
             # pair the message with the thought written just before it (playbook: think, then say)
             last = os.path.join(VIDEO_LOG_DIR, ".last_thought")
             tid = open(last).read().strip() if os.path.exists(last) else None
@@ -641,7 +648,9 @@ def main(argv):
                 sys.path.insert(0, HERE)
                 import timeline
                 for m in timeline.read(CHAT, timeline.chat_rewind)[-n:]:   # not the abandoned turns of a reload
-                    print("T%-4d %s %-7s %s" % (m["turn"], m["time"], m["from"], m["text"]))
+                    who = m["from"] + (" -> " + m["to"] if m.get("to") and m["to"] != "you" else
+                                       " (privately to you)" if m.get("to") == "you" else "")
+                    print("T%-4d %s %-7s %s" % (m["turn"], m["time"], who, m["text"]))
             else:
                 print("no messages yet")
         elif cmd == "director":
