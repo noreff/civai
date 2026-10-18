@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 83
+BRIDGE_VERSION = 84
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3851,7 +3851,8 @@ def suggest(want, count, getter):
 	descs = [getter(i).getDescription() for i in range(count)]
 	low = dict([(d.lower(), d) for d in descs])
 	hits = difflib.get_close_matches(want.strip().lower(), low.keys(), 3, 0.6)
-	starts = [d for d in descs if want.strip().lower().split(" ")[0] and d.lower().startswith(want.strip().lower().split(" ")[0])]
+	first = want.strip().lower().split(" ")[0]
+	starts = [d for d in descs if first and (d.lower().startswith(first) or (" " + first) in d.lower())]
 	out = []
 	for h in [low[x] for x in hits] + starts:
 		if h not in out:
@@ -3987,6 +3988,10 @@ def cmdBuild(args):
 	c = findCity(args)
 	if c.getOwner() != iMe:
 		raise Exception("%s is not our city" % c.getName())
+	if args["item"].strip().lower() in ("", "list", "options", "?"):
+		# no item: what the city builds now and what it could build (asking, not ordering)
+		return {"city": c.getName(), "queue": [orderName(c.getOrderFromQueue(k)) for k in range(c.getOrderQueueLength())] or "nothing",
+			"can_build": ", ".join(buildableNow(c)), "order": "civ build %s <item> [--queue|--first]" % c.getName()}
 	if args["item"].strip().lower() == "auto":
 		# hand the city to the game's automation: the built-in AI picks its builds
 		d = loadCityClaims()
