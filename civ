@@ -15,7 +15,10 @@
                            It leaves any stack it is in; --stack moves the whole stack with it. A tile with
                            enemy units is an attack: refused with the odds unless --attack
   civ actions <unit id>    what the unit can do right now (the game's own buttons)
-  civ do <unit id> <action> [X Y | unit id] [--queue]   (LEAD <unit id>: a Great General joins that unit)
+  civ espionage [<leader> <weight>]   espionage points against each leader, and how new points are split
+                           (the Espionage screen); with a leader and a weight, sets that weight
+  civ do <unit id> <action> [X Y | unit id | target] [--queue]   (LEAD <unit id>: a Great General joins
+                           that unit; a spy's mission: civ do <spy> STEAL_TREASURY, BUY_TECH <tech>, ...)
                            do one: FORTIFY, SENTRY, FOUND, BUILD_FARM, BUILD_ROAD, PILLAGE,
                            PROMOTE_COMBAT1, UPGRADE_..., AUTO_BUILD, AUTO_EXPLORE, ...;
                            MOVE_TO / ROUTE_TO take X Y; the unit stays yours (AUTO_ hands
@@ -339,7 +342,7 @@ def units_by_tile(s, players):
 LOOKUPS = {"ping", "status", "map", "tile", "odds", "city", "unit", "player", "actions", "offers", "proposals",
            "tradeable", "relations", "victory", "rules", "area", "around", "where", "card", "chat", "events", "deals",
            "think", "director"}
-SHOW_WITHOUT_ARGS = {"research", "budget", "religion", "civics", "gate", "hurry"}
+SHOW_WITHOUT_ARGS = {"research", "budget", "religion", "civics", "gate", "hurry", "espionage"}
 
 
 def read_only(argv):
@@ -563,10 +566,13 @@ def main(argv):
         elif cmd == "do":
             words = [a for a in argv[1:] if not a.startswith("--")]
             args = {"id": int(words[0]), "action": words[1]}
-            if len(words) > 3:
+            num = lambda w: w.lstrip("-").isdigit()
+            if len(words) > 3 and num(words[2]) and num(words[3]):
                 args["x"], args["y"] = int(words[2]), int(words[3])
-            elif len(words) == 3:
+            elif len(words) == 3 and words[2].lstrip("#").isdigit():
                 args["unit"] = int(words[2].lstrip("#"))   # LEAD <unit id>
+            elif len(words) >= 3:
+                args["target"] = " ".join(words[2:])        # a spy's mission target: BUY_TECH Plastics
             if "--queue" in argv:
                 args["queue"] = True
             args["stack"] = "--stack" in argv
@@ -645,6 +651,11 @@ def main(argv):
             print(fmt_record(call("research", args)))
         elif cmd == "votes":
             print(fmt_record(call("votes")))
+        elif cmd == "espionage":
+            a = {}
+            if len(argv) >= 3:
+                a = {"leader": " ".join(argv[1:-1]), "weight": int(argv[-1])}
+            print(fmt_record(call("espionage", a)))
         elif cmd == "work":
             print(fmt_record(call("work", {"words": [a for a in argv[1:]]})))
         elif cmd == "build":

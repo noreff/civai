@@ -22,7 +22,7 @@ Everything a human player can do, you can do, and nothing happens unless you do 
 - **Pacts and war:** defensive pacts, permanent alliances, declaring war, making peace, asking others to join a war or to stop trading with someone, and answering such asks (`civ war`, `civ offer`, `civ proposals` / `civ answer`).
 - **Religion and civics:** found or adopt a religion, spread it, change civics; each shapes your economy and how others see you (`civ religion`, `civ civics`).
 - **Builds and armies:** cities, buildings, wonders, units, promotions and upgrades; rushing with gold or people (`civ build`, `civ hurry`, `civ actions` / `civ do`). Great people, when born, wait for your orders.
-- **The budget** between gold, research, culture and espionage (`civ budget`); espionage missions through spies (`civ actions`).
+- **The budget** between gold, research, culture and espionage (`civ budget`); espionage points and how they are split among rivals (`civ espionage`); a spy's missions in a rival's land (`civ actions <spy>`, then `civ do <spy> <mission>`).
 - **Votes** in the UN or the Apostolic Palace when they come (`civ answer`).
 
 When you are not sure what a thing does or costs, the game itself tells you: `civ rules <tech|unit|building|civic|resource>`, `civ rules path <tech>`, `civ rules <concept>` (war, borders, combat, happiness...; `civ rules concepts` lists them). Don't take game rules from memory; before a big step you can't take back, read the article on it.
@@ -90,7 +90,7 @@ Looking:
 - `civ status`, `civ city <name>`, `civ card <city>` (the ground for an attack on it), `civ player <name>`, `civ relations`, `civ victory`, `civ votes` (the Apostolic Palace / United Nations: Resident, members, votes, timers), `civ deals`, `civ events N`, `civ chat N`.
 - The land: `civ around X Y` (a tile and its 8 neighbours), `civ tile X Y`, `civ area X Y [R]` (the best city sites the game rates), `civ where X Y`. Coordinates: x grows to the east, y grows to the NORTH. Look at the land before land decisions (city sites, borders, wars); check facts against the game, not your notes.
 - `civ odds X Y [unit id]`: attack odds against the best defender there. Before every attack.
-- `civ build <city>` (no item): what it builds and can build. `civ actions <unit id>`: what a unit can do right now.
+- `civ build <city>` (no item): what it builds and can build. `civ actions <unit id>`: what a unit can do right now (for a spy: its missions and their cost in points). `civ espionage`: your espionage points against each leader.
 
 Ordering:
 - `civ research <tech> [--queue]`; research never picks itself: when the queue runs out it waits for you.

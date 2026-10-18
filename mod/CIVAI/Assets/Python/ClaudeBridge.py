@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 113
+BRIDGE_VERSION = 115
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1843,12 +1843,74 @@ def unitActions(u):
 			pass
 	return out
 
+def spyOptions(i, target, pl):
+	# the choices of a two-phase mission (the game's second popup): which building, tech, civic, religion, project
+	k = gc.getEspionageMissionInfo(i)
+	tp = gc.getPlayer(target)
+	tt = gc.getTeam(tp.getTeam())
+	c = pl.isCity() and pl.getPlotCity() or None
+	if k.getDestroyBuildingCostFactor() > 0 and c:
+		return [(b, gc.getBuildingInfo(b).getDescription()) for b in range(gc.getNumBuildingInfos()) if c.getNumRealBuilding(b) > 0]
+	if k.getBuyTechCostFactor() > 0:
+		mine = gc.getTeam(gc.getPlayer(getClaudePlayer()).getTeam())
+		return [(t, gc.getTechInfo(t).getDescription()) for t in range(gc.getNumTechInfos()) if tt.isHasTech(t) and not mine.isHasTech(t)]
+	if k.getSwitchCivicCostFactor() > 0:
+		return [(v, gc.getCivicInfo(v).getDescription()) for v in range(gc.getNumCivicInfos())]
+	if k.getSwitchReligionCostFactor() > 0:
+		return [(v, gc.getReligionInfo(v).getDescription()) for v in range(gc.getNumReligionInfos())]
+	if k.getType() == "ESPIONAGEMISSION_DESTROY_PROJECT":
+		return [(v, gc.getProjectInfo(v).getDescription()) for v in range(gc.getNumProjectInfos()) if tt.getProjectCount(v) > 0]
+	return []
+
+def spyMissions(u):
+	# a spy's missions where it stands, as the game's espionage popup lists them: (name, mission, data, cost, possible)
+	# and why there are none. The game's rules: in another leader's land, not moved this turn (a spy must begin its
+	# turn there), and enough espionage points against that leader
+	if not gc.getUnitInfo(u.getUnitType()).isSpy():
+		return [], None
+	pl = u.plot()
+	target = pl.getOwner()
+	if target < 0 or target == u.getOwner():
+		return [], "a spy's missions are done in another leader's land"
+	if u.hasMoved() or u.isMadeAttack():
+		return [], "a spy must begin its turn where it acts: it has moved (or acted) this turn, so its missions open next turn"
+	if not u.canEspionage(pl):
+		return [], "the game allows no mission here now (e.g. a vassal's land, or the spy is seen)"
+	me = gc.getPlayer(u.getOwner())
+	out = []
+	for i in range(gc.getNumEspionageMissionInfos()):
+		k = gc.getEspionageMissionInfo(i)
+		if k.isPassive():
+			continue   # passive missions (see research, demographics) need no spy: the Espionage screen
+		if k.getTechPrereq() >= 0 and not gc.getTeam(me.getTeam()).isHasTech(k.getTechPrereq()):
+			continue
+		name = k.getType()[len("ESPIONAGEMISSION_"):]
+		opts = k.isTwoPhases() and spyOptions(i, target, pl) or [(-1, None)]
+		for data, label in opts:
+			cost = me.getEspionageMissionCost(i, target, pl, data)
+			if cost < 0:
+				continue
+			out.append((label and "%s %s" % (name, label) or name, i, data, cost, me.canDoEspionageMission(i, target, pl, data)))
+	return out, None
+
 def cmdActions(args):
 	u = myUnit(args["id"])
 	acts = unitActions(u)
 	r = {"id": u.getID(), "unit": gc.getUnitInfo(u.getUnitType()).getDescription(), "at": (u.getX(), u.getY()),
 		"moves_left": u.movesLeft() / gc.getMOVE_DENOMINATOR(),
 		"actions": [n for (n, a, t) in acts if not t], "with_target_x_y": [n for (n, a, t) in acts if t]}
+	if gc.getUnitInfo(u.getUnitType()).isSpy():
+		missions, why = spyMissions(u)
+		target = u.plot().getOwner()
+		if target >= 0 and target != u.getOwner():
+			r["espionage_points"] = "%d against %s" % (gc.getTeam(gc.getPlayer(u.getOwner()).getTeam()).getEspionagePointsAgainstTeam(
+				gc.getPlayer(target).getTeam()), pname(target))
+		if why:
+			r["spy_missions"] = why
+		else:
+			r["spy_missions"] = ["%s: %d points%s" % (n, cost, not ok and " (not possible now)" or "")
+				for (n, i, data, cost, ok) in missions] or ["none here"]
+			r["spy_order"] = "civ do %d <mission> (e.g. civ do %d STEAL_TREASURY); the target can catch the spy" % (u.getID(), u.getID())
 	gives = actionYields(u, [n for (n, a, t) in acts], acts)
 	if gives:
 		r["what_they_give"] = gives
@@ -1899,10 +1961,49 @@ def whyNoFound(u):
 		return "the settler has no moves left this turn"
 	return "the game's rules don't allow a city on this tile"
 
+def doSpyMission(u, want):
+	# the game's own path (the espionage popup's answer): push MISSION_ESPIONAGE with the mission and its choice;
+	# CvUnit::espionage tests interception, pays the points and sends the spy home
+	missions, why = spyMissions(u)
+	if why:
+		raise Exception(why)
+	w = want.upper().replace("_", " ")
+	pick = [x for x in missions if x[0].upper().replace("_", " ") == w] or \
+		[x for x in missions if x[0].upper().replace("_", " ").startswith(w)]
+	if len(pick) != 1:
+		raise Exception("%s: %s. The missions here: %s" % (want, pick and "say which one" or "no such mission here",
+			", ".join([x[0] for x in (pick or missions)]) or "none"))
+	name, i, data, cost, ok = pick[0]
+	if not ok:
+		have = gc.getTeam(gc.getPlayer(u.getOwner()).getTeam()).getEspionagePointsAgainstTeam(gc.getPlayer(u.plot().getOwner()).getTeam())
+		raise Exception("%s is not possible now: it costs %d points; you have %d against %s" % (name, cost, have, pname(u.plot().getOwner())))
+	if not gc.getPlayer(u.getOwner()).isTurnActive():
+		raise Exception("a spy acts during our own turn; give the order when the turn begins")
+	target = u.plot().getOwner()
+	alone(u, {})
+	before = gc.getTeam(gc.getPlayer(u.getOwner()).getTeam()).getEspionagePointsAgainstTeam(gc.getPlayer(target).getTeam())
+	u.getGroup().pushMission(MissionTypes.MISSION_ESPIONAGE, i, data, 0, False, True, MissionAITypes.NO_MISSIONAI, u.plot(), u)
+	after = gc.getTeam(gc.getPlayer(u.getOwner()).getTeam()).getEspionagePointsAgainstTeam(gc.getPlayer(target).getTeam())
+	refreshSnapshot()
+	alive = gc.getPlayer(u.getOwner()).getUnit(u.getID())
+	if after < before:
+		r = {"mission": name, "against": pname(target), "points_spent": before - after}
+		if alive and not alive.isNone():
+			r["spy"] = "escaped to (%d,%d)" % (alive.getX(), alive.getY())
+		else:
+			r["spy"] = "caught after the mission"
+		return r
+	if not alive or alive.isNone():
+		return {"mission": name, "result": "the spy was caught before it could act (no points spent)"}
+	return {"mission": name, "result": "the game did not carry it out", "points": after}
+
 def cmdDo(args):
 	# do one of the unit's available actions; queue=true adds it after its current orders
 	u = myUnit(args["id"])
 	want = args["action"].strip().upper().replace(" ", "_")
+	if gc.getUnitInfo(u.getUnitType()).isSpy() and want not in ("MOVE_TO", "ROUTE_TO") and \
+			[n for (n, a, t) in unitActions(u) if n == ACTION_WORDS.get(want, want)] == []:
+		return doSpyMission(u, (want + " " + (args.get("target") or "")).strip())
 	acts = unitActions(u)
 	want = ACTION_WORDS.get(want, want)
 	match = [x for x in acts if x[0] == want]
@@ -4249,6 +4350,28 @@ def victoryVotes(vs):
 			out.append(line)
 	return out
 
+def cmdEspionage(args):
+	# the Espionage screen: our points against each leader we know, and the weights that split new points
+	iMe, iTeam = myIds()
+	me, team = gc.getPlayer(iMe), gc.getTeam(iTeam)
+	if args.get("leader"):
+		other = findPlayer(args["leader"])
+		w = int(args.get("weight", 0))
+		if w < 0:
+			raise Exception("a weight is 0 or more")
+		me.setEspionageSpendingWeightAgainstTeam(gc.getPlayer(other).getTeam(), w)
+	rows = []
+	for i in range(gc.getMAX_CIV_PLAYERS()):
+		p = gc.getPlayer(i)
+		if i == iMe or not p.isAlive() or not team.isHasMet(p.getTeam()):
+			continue
+		rows.append("%s: %d points; weight %d; %d new points a turn" % (pname(i), team.getEspionagePointsAgainstTeam(p.getTeam()),
+			me.getEspionageSpendingWeightAgainstTeam(p.getTeam()), me.getEspionageSpending(p.getTeam())))
+	return {"points_against": rows or ["no leader met"],
+		"espionage_share_of_budget": "%d%%" % me.getCommercePercent(CommerceTypes.COMMERCE_ESPIONAGE),
+		"how": "new points each turn are split by the weights (civ espionage <leader> <weight>); a spy's missions "
+			"(civ actions <spy>) spend points against the leader whose land it stands in"}
+
 def cmdVotes(args):
 	# the Voting screen: each diplomatic body (Apostolic Palace, United Nations), its Resident, members and votes
 	iMe, iTeam = myIds()
@@ -4784,6 +4907,7 @@ COMMANDS = {
 	"build": cmdBuild,
 	"work": cmdWork,
 	"votes": cmdVotes,
+	"espionage": cmdEspionage,
 	"hurry": cmdHurry,
 	"ping": cmdPing,
 	"status": cmdStatus,
