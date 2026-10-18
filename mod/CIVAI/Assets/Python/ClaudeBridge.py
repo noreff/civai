@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 164
+BRIDGE_VERSION = 165
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1359,7 +1359,8 @@ def glide(a, b, z0, z1, seconds):
 
 def pushIn(plot, seconds):
 	# an event's shot holds on the place and slowly pushes in
-	z = max(CyCamera().GetZoom(), 0.45)
+	z = 0.5   # an event is seen from a middle distance, whatever shot came before (a far tour hid the city)
+	CyCamera().SetZoom(z)
 	glide(plot, plot, z, z * 0.96, seconds)
 	shotLabel([plot.getOwner()])
 
