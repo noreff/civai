@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 142
+BRIDGE_VERSION = 143
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -4816,11 +4816,17 @@ def cmdBuild(args):
 	elif args.get("first"):
 		c.pushOrder(order, i, -1, False, False, False, True)
 	else:
+		dropped = [orderName(c.getOrderFromQueue(k)) for k in range(c.getOrderQueueLength())]
 		c.clearOrderQueue()
 		c.pushOrder(order, i, -1, False, True, False, True)
 	claimCity(c)
-	return {"city": c.getName(), "queue": [orderName(c.getOrderFromQueue(k)) for k in range(c.getOrderQueueLength())],
+	r = {"city": c.getName(), "queue": [orderName(c.getOrderFromQueue(k)) for k in range(c.getOrderQueueLength())],
 		"turns": c.getProductionTurnsLeft()}
+	if not args.get("queue") and not args.get("first") and dropped and dropped != [name] and dropped != r["queue"]:
+		# a plain build replaces the whole queue: say what went, so a meant "after that" is seen at once
+		r["replaced"] = "%s (gone from the queue; the hammers already in go to the new item; to add after instead: civ build %s <item> --queue)" % (
+			", ".join(dropped), c.getName())
+	return r
 
 
 def hurryCivics(have, c=None):
