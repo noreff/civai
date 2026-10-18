@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 70
+BRIDGE_VERSION = 71
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1064,8 +1064,36 @@ def recordEvent(tag, a):
 	elif tag == "cultureExpansion" and a[0].getOwner() == iMe:
 		writeEvent("borders_expanded", {"city": a[0].getName()})
 
+def writeTruth(turn):
+	# the director's record of every civ each turn (for the paper and the video); no agent can read it
+	rows = []
+	for i in range(gc.getMAX_CIV_PLAYERS()):
+		p = gc.getPlayer(i)
+		if not p.isEverAlive():
+			continue
+		t = gc.getTeam(p.getTeam())
+		units, mil = 0, 0
+		(u, it) = p.firstUnit(False)
+		while u and not u.isNone():
+			units = units + 1
+			if u.canAttack():
+				mil = mil + 1
+			(u, it) = p.nextUnit(it, False)
+		rows.append({"id": i, "name": p.getName(), "civ": p.getCivilizationShortDescription(0), "alive": p.isAlive(),
+			"agent": isAgent(i), "human": p.isHuman(), "score": gc.getGame().getPlayerScore(i), "cities": p.getNumCities(),
+			"pop": p.getTotalPopulation(), "units": units, "military": mil, "gold": p.getGold(),
+			"techs": len([k for k in range(gc.getNumTechInfos()) if t.isHasTech(k)]), "era": gc.getEraInfo(p.getCurrentEra()).getType(),
+			"religion": p.getStateReligion(), "war": [j for j in range(gc.getMAX_CIV_TEAMS()) if j != p.getTeam() and t.isAtWar(j)],
+			"met": [j for j in range(gc.getMAX_CIV_TEAMS()) if j != p.getTeam() and t.isHasMet(j)]})
+	appendLine(OUT_DIR + "\\truth.jsonl", {"turn": turn, "time": time.strftime("%Y-%m-%d %H:%M:%S"), "civs": rows})
+
 def safeRecordEvent(tag, args):
 	try:
+		if tag == "BeginGameTurn" and seatsConfigured():
+			try:
+				writeTruth(args[0] + 1)
+			except:
+				log("truth FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 		if seatsConfigured():
 			forEachSeat(recordEvent, tag, args)
 		else:
