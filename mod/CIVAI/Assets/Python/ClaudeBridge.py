@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 77
+BRIDGE_VERSION = 78
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -172,16 +172,12 @@ def getClaudePlayer():
 	# otherwise the first living AI civ
 	if g_acting[0] is not None:
 		return g_acting[0]
+	if seatsConfigured():
+		return -1   # several agents: only a seat's own context has a "me" (asSeatOf, forEachSeat, a request)
 	try:
-		if os.path.exists(CONFIG_FILE):
-			f = open(CONFIG_FILE, "r")
-			try:
-				for line in f.readlines():
-					line = line.strip()
-					if line.startswith("player"):
-						return int(line.split("=")[1].strip())
-			finally:
-				f.close()
+		v = configValue("player")
+		if v is not None:
+			return int(v)
 	except:
 		pass
 	for i in range(gc.getMAX_CIV_PLAYERS()):
@@ -1310,9 +1306,28 @@ def waypoints(u, tx, ty, limit=6):
 	best.sort()
 	return [(b[2], b[3]) for b in best[:limit]]
 
+def asSeatOf(owner, fn, *args):
+	# the game asks about one civ's unit, city or turn: answer with that civ's own seat (its unit
+	# claims, build lists, choices). Without this, every agent but one was run by the built-in AI.
+	B = sys.modules["ClaudeBridge"]
+	if B.seatsConfigured() and owner in B.agentPlayers() and B.g_acting[0] != owner:
+		prev = B.actAs(owner)
+		try:
+			return fn(*args)
+		finally:
+			B.actAs(prev)
+	return fn(*args)
+
+def teamAgent(eTeam):
+	for i in sys.modules["ClaudeBridge"].agentPlayers():
+		if gc.getPlayer(i).getTeam() == eTeam:
+			return i
+	return -1
+
 def unitUpdateTrampoline(argsList):
 	import CvGameInterfaceFile
-	return sys.modules["ClaudeBridge"].aiUnitUpdate(CvGameInterfaceFile.GameUtils, argsList)
+	B = sys.modules["ClaudeBridge"]
+	return B.asSeatOf(argsList[0].getOwner(), B.aiUnitUpdate, CvGameInterfaceFile.GameUtils, argsList)
 
 def cmdClaim(args):
 	u = myUnit(args["id"])
@@ -2204,7 +2219,8 @@ def doGoldHook(gu, argsList):
 
 def doGoldTrampoline(argsList):
 	import CvGameInterfaceFile
-	return sys.modules["ClaudeBridge"].doGoldHook(CvGameInterfaceFile.GameUtils, argsList)
+	B = sys.modules["ClaudeBridge"]
+	return B.asSeatOf(argsList[0], B.doGoldHook, CvGameInterfaceFile.GameUtils, argsList)
 
 # ------------------------------------------------- captured cities: keep or burn is Claude's
 #
@@ -2223,7 +2239,8 @@ def canRazeHook(gu, argsList):
 
 def canRazeTrampoline(argsList):
 	import CvGameInterfaceFile
-	return sys.modules["ClaudeBridge"].canRazeHook(CvGameInterfaceFile.GameUtils, argsList)
+	B = sys.modules["ClaudeBridge"]
+	return B.asSeatOf(argsList[0], B.canRazeHook, CvGameInterfaceFile.GameUtils, argsList)
 
 def cmdRaze(args):
 	iMe = getClaudePlayer()
@@ -3701,11 +3718,13 @@ def aiDoWar(gu, argsList):
 
 def doDiploTrampoline(argsList):
 	import CvGameInterfaceFile
-	return sys.modules["ClaudeBridge"].aiDoDiplo(CvGameInterfaceFile.GameUtils, argsList)
+	B = sys.modules["ClaudeBridge"]
+	return B.asSeatOf(argsList[0], B.aiDoDiplo, CvGameInterfaceFile.GameUtils, argsList)
 
 def doWarTrampoline(argsList):
 	import CvGameInterfaceFile
-	return sys.modules["ClaudeBridge"].aiDoWar(CvGameInterfaceFile.GameUtils, argsList)
+	B = sys.modules["ClaudeBridge"]
+	return B.asSeatOf(B.teamAgent(argsList[0]), B.aiDoWar, CvGameInterfaceFile.GameUtils, argsList)
 
 # ------------------------------------------------------- orders: research, builds
 #
@@ -3921,7 +3940,8 @@ def aiChooseProduction(gu, argsList):
 
 def chooseProductionTrampoline(argsList):
 	import CvGameInterfaceFile
-	return sys.modules["ClaudeBridge"].aiChooseProduction(CvGameInterfaceFile.GameUtils, argsList)
+	B = sys.modules["ClaudeBridge"]
+	return B.asSeatOf(argsList[0].getOwner(), B.aiChooseProduction, CvGameInterfaceFile.GameUtils, argsList)
 
 # ---------------------------------------------------------------- turn gate
 #

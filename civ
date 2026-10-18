@@ -497,9 +497,9 @@ def main(argv):
             if not r["game_ready"]:
                 print("bridge alive (%.0f ms), no game in progress" % ms)
             else:
-                print("bridge v%s alive (%.0f ms). Turn %d, %s. You = player %d. Turn active: %s" % (
-                    r.get("bridge_version", 1), ms, r["turn"], year(r["year"]), r["claude_player"],
-                    r["turn_active_players"]))
+                who = "You = player %d" % r["claude_player"] if r["claude_player"] >= 0 else "Director's view"
+                print("bridge v%s alive (%.0f ms). Turn %d, %s. %s. Turn active: %s" % (
+                    r.get("bridge_version", 1), ms, r["turn"], year(r["year"]), who, r["turn_active_players"]))
         elif cmd == "status":
             print(fmt_status(call("status"), compact="--brief" in argv))
         elif cmd == "map":
