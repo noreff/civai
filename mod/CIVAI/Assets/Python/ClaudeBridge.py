@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 162
+BRIDGE_VERSION = 163
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -4885,7 +4885,11 @@ def cmdWork(args):
 	if not rest:
 		return workView(c)
 	if rest[0].lower() == "auto":
-		c.alterWorkingPlot(0)   # the city tile: the governor places the citizens again
+		# the governor places every citizen again. Clicking the city tile only switches it on: if it was on
+		# already, the game re-places nobody, so it is switched off and on (on runs the placing)
+		if c.isCitizensAutomated():
+			c.setCitizensAutomated(False)
+		c.setCitizensAutomated(True)
 		return workView(c)
 	if len(rest) >= 2 and rest[0].lstrip("-").isdigit() and rest[1].lstrip("-").isdigit():
 		pl = CyMap().plot(int(rest[0]), int(rest[1]))
