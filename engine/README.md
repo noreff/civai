@@ -13,8 +13,18 @@ and then the built-in AI makes no choices for it:
   bridge: the game event `claudeDiplomacy`; offers made to it (`claudeOffered`) get no minister's answer;
 - unit automation never disbands its units (CvUnitAI::AI_scrapUnlessClaude).
 
+- other leaders ask it like a human: peace, capitulation and war-hire offers (AI_doPeace, the hire
+  block), tribute requests from a master (also from the human master: no automatic war);
+- votes (UN / Apostolic Palace), random events and quests, free techs (Oracle, first-to-discover)
+  are Claude's choices (game events `claudeVote`, `claudeEvent`, `claudeFreeTech`);
+- research is never picked or wiped for it; the budget and espionage weights are never reset;
+- its ministers don't refuse trades, cap gold, refuse to talk or write counter-offers: Claude answers;
+- it plays by the human's difficulty rules (costs, upkeep, unit supply, inflation, war weariness,
+  upgrade prices, production decay, animal/barbarian combat);
+- handing it to Claude clears war plans the built-in AI left behind.
+
 Python additions: CyPlayer.isClaude/setClaude, handleDiploEvent (answer an AI's request with the
-game's own effects), AI_considerOfferText, implementDealText; CyTeam.isClaude.
+game's own effects), AI_considerOfferText, implementDealText; CyTeam.isClaude, CyGame.castVote, CyPlayer.claudeApplyEvent, CySelectionGroup.claudePathTurns.
 
 ## Build (on the Mac, MSVC 7.1 under CrossOver)
 
