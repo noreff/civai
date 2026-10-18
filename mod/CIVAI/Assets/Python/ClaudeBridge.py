@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 94
+BRIDGE_VERSION = 95
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -802,7 +802,21 @@ def cmdCity(args):
 				tp.getYield(YieldTypes(0)), tp.getYield(YieldTypes(1)), tp.getYield(YieldTypes(2))])
 	d["tile_fields"] = ["x", "y", "worked", "food", "production", "commerce"]
 	d["tiles"] = tiles
+	d["trade_routes"] = tradeRoutes(c, iMe)
 	return d
+
+def tradeRoutes(c, iMe):
+	# the city screen's trade routes: where each goes and the commerce it brings (foreign ones are what
+	# Mercantilism and an embargo would cut)
+	out = []
+	for i in range(c.getTradeRoutes()):
+		t = c.getTradeCity(i)
+		if t is None or t.isNone():
+			continue
+		gain = c.calculateTradeYield(YieldTypes.YIELD_COMMERCE, c.calculateTradeProfit(t))
+		owner = t.getOwner() == iMe and "ours" or pname(t.getOwner())
+		out.append("%s (%s): +%d commerce" % (t.getName(), owner, gain))
+	return out or ["none"]
 
 def cmdUnit(args):
 	iMe, iTeam = myIds()
