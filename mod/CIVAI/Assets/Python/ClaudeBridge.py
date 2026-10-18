@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 74
+BRIDGE_VERSION = 75
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1115,11 +1115,17 @@ def directorCamera(tag, a):
 	g = gc.getGame()
 	if not g_camera["debug_tried"]:
 		g_camera["debug_tried"] = True
-		if not g.isDebugMode():
+		# the spectator's team sees all the land (screen only), then the debug view draws every unit and city;
+		# turning it on (or off and on) is what redraws the map
+		m, team = gc.getMap(), gc.getPlayer(g.getActivePlayer()).getTeam()
+		for i in range(m.numPlots()):
+			m.plotByIndex(i).setRevealed(team, True, False, -1)
+		if g.isDebugMode():
 			g.toggleDebugMode()
-			if not g.isDebugMode():
-				g.toggleDebugMode()   # no cheat code: the game ignores it; leave the view as it was
-				log("director camera: no full-map view (set CheatCode in CivilizationIV.ini)")
+		g.toggleDebugMode()
+		if not g.isDebugMode():
+			g.toggleDebugMode()   # no cheat code: the game ignores it; leave the view as it was
+			log("director camera: no full-map view (set CheatCode in CivilizationIV.ini)")
 	if tag == "BeginGameTurn":
 		if not g_camera["turn_news"]:
 			seats = [i for i in agentPlayers() if gc.getPlayer(i).isAlive() and not gc.getPlayer(i).getCapitalCity().isNone()]
