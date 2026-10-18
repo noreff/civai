@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 167
+BRIDGE_VERSION = 168
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -2461,6 +2461,8 @@ def doSpyMission(u, want):
 	if not gc.getPlayer(u.getOwner()).isTurnActive():
 		raise Exception("a spy acts during our own turn; give the order when the turn begins")
 	target = u.plot().getOwner()
+	spot = u.plot().getPlotCity()   # where the mission happens (after it the game sends the spy home)
+	where = spot and not spot.isNone() and spot.getName() or ("%d,%d" % (u.getX(), u.getY()))
 	alone(u, {})
 	before = gc.getTeam(gc.getPlayer(u.getOwner()).getTeam()).getEspionagePointsAgainstTeam(gc.getPlayer(target).getTeam())
 	u.getGroup().pushMission(MissionTypes.MISSION_ESPIONAGE, i, data, 0, False, True, MissionAITypes.NO_MISSIONAI, u.plot(), u)
@@ -2470,8 +2472,6 @@ def doSpyMission(u, want):
 	if after < before:
 		# the victim hears what the game would show its screen: what was done and where, not by whom
 		try:
-			city = u.plot().getPlotCity()
-			where = city and not city.isNone() and city.getName() or ("%d,%d" % (u.getX(), u.getY()))
 			if isAgent(target):
 				prev = actAs(target)
 				try:
