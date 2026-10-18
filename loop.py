@@ -1045,7 +1045,8 @@ def main():
         if reasons:
             time.sleep(GATHER_SECONDS)              # let the burst finish
             events, epos = read_from(EVENTS, st["events_pos"])
-            reasons = reasons_of(events) or reasons
+            again = reasons_of(events)
+            reasons = (again + [r for r in reasons if "waits for you" in r and r not in again]) if again else reasons
         if reasons and not any(r.startswith(("turn ", "player_waiting")) for r in reasons) and \
                 (st.get("audiences") or {}).get(str(game_turn()), 0) >= AUDIENCE_PER_TURN and not (once or dry):
             # enough audiences this turn: these messages wait for the next turn's wake-up (they stay unread till then)
