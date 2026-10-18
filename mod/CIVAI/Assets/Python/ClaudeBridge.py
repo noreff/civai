@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 124
+BRIDGE_VERSION = 126
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1562,12 +1562,25 @@ def deliverChat(frm, text, to):
 				writeEvent("message_from_leader", {"from": pname(frm), "text": text, "private": to is not None})
 		finally:
 			actAs(prev)
-	# the screen (a human player or the spectator) shows every line: the video sees all channels
-	head = to is None and u"%s to all" % full(frm) or u"%s \u2192 %s" % (full(frm), full(to))
-	line = u"<font=3><color=255,200,60,255>[%s]:  %s</color></font>" % (head, text)
-	for i in humanPlayers():
-		CyInterface().addMessage(i, True, gc.getEVENT_MESSAGE_TIME() * 3, line, "",
+	# the screen (a human player, or the spectator whose screen is filmed) shows every line: the video sees all
+	# channels. The speaker in his civ's colour; a private line says to whom and that it is private
+	head = to is None and u"%s to all" % colored(frm, full(frm)) or \
+		u"%s \u2192 %s  <color=170,170,170,255>(private)</color>" % (colored(frm, full(frm)), colored(to, full(to)))
+	screens = humanPlayers()
+	if spectating() and gc.getGame().getActivePlayer() not in screens:
+		screens.append(gc.getGame().getActivePlayer())
+	line = u"<font=3>%s:  <color=255,235,180,255>%s</color></font>" % (head, text)   # the message panel wraps it
+	for i in screens:
+		CyInterface().addMessage(i, True, gc.getEVENT_MESSAGE_TIME() * 4, line, "",
 			InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
+
+def colored(i, text):
+	# a leader's name in his civ's colour, as the game's own score list shows it
+	try:
+		c = gc.getColorInfo(gc.getPlayerColorInfo(gc.getPlayer(i).getPlayerColor()).getColorTypePrimary()).getColor()
+		return u"<color=%d,%d,%d,255>%s</color>" % (int(c.r * 255), int(c.g * 255), int(c.b * 255), text)
+	except:
+		return text
 
 def chatBegin(argsList=-1):
 	import Popup as PyPopup
