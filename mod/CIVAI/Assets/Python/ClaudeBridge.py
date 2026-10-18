@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 161
+BRIDGE_VERSION = 162
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -5058,10 +5058,22 @@ def cmdBuild(args):
 		return {"city": c.getName(), "builds": "chosen by the game's automation until you `civ build` here",
 			"queue": [orderName(c.getOrderFromQueue(k)) for k in range(c.getOrderQueueLength())]}
 	order, i, name = findItem(args["item"])
+	# a building or project already in the queue can't be added twice (the game's rule): --queue says where it
+	# is, --first moves it to the front, a plain build makes it the only item
+	inQueue = [k for k in range(c.getOrderQueueLength()) if int(c.getOrderFromQueue(k).eOrderType) == int(order)
+		and c.getOrderFromQueue(k).iData1 == i and order != OrderTypes.ORDER_TRAIN]
+	if inQueue and not args.get("check"):
+		k = inQueue[0]
+		if args.get("queue") or (args.get("first") and k == 0):
+			return {"city": c.getName(), "queue": [orderName(c.getOrderFromQueue(j)) for j in range(c.getOrderQueueLength())],
+				"note": "%s is already in the queue (place %d of %d); nothing changed" % (name, k + 1, c.getOrderQueueLength()),
+				"turns": c.getProductionTurnsLeft()}
+		if args.get("first"):
+			c.popOrder(k, False, False)   # the hammers stay with the building; it goes back in at the front below
 	if order == OrderTypes.ORDER_TRAIN:
 		possible = c.canTrain(i, False, False)
 	elif order == OrderTypes.ORDER_CONSTRUCT:
-		possible = c.canConstruct(i, False, False, False)
+		possible = c.canConstruct(i, bool(inQueue), False, False)
 	elif order == OrderTypes.ORDER_CREATE:
 		possible = c.canCreate(i, False, False)
 	else:
