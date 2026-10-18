@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 129
+BRIDGE_VERSION = 130
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -792,6 +792,9 @@ def cmdCity(args):
 		"capital": c.isCapital(),
 		"food": {"stored": c.getFood(), "needed": c.growthThreshold(), "surplus": c.foodDifference(True),
 			"turns": c.getFoodTurnsLeft()},
+		"food_note": c.isFoodProduction() and ("while it builds a %s, its food surplus (%+d) goes into production "
+			"(the game's rule for settlers and workers): the city doesn't grow, and a food tile adds hammers"
+			% (c.getProductionName(), c.foodDifference(False))) or None,
 		"yields": dict([(YIELDS[i], c.getYieldRate(i)) for i in range(3)]),
 		"commerce": dict([(COMMERCES[i], c.getCommerceRate(i)) for i in range(4)]),
 		"production": {"item": c.getProductionName(), "progress": c.getProduction(),
