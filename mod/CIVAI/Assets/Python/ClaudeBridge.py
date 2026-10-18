@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 51
+BRIDGE_VERSION = 52
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -267,6 +267,10 @@ def riverEdges(pl):
 	return m
 
 def dump(reason):
+	if reason == "load_game":
+		# a loaded save is a new starting point: nothing in it is a deal made since the last look
+		g_snap[0] = None
+		g_window[0] = None
 	iMe = getClaudePlayer()
 	if iMe < 0:
 		log("no AI player to dump for")
