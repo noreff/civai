@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 158
+BRIDGE_VERSION = 159
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1188,6 +1188,31 @@ def cameraTo(x, y, prio):
 	g_camera["at"], g_camera["prio"], g_camera["turn_news"] = now, prio, True
 	pushIn(plot, EVENT_HOLD)
 
+MOVE_WATCH_GAP = 8      # seconds: the camera follows at most one army move this often (an attack always)
+
+def watchMove(u, target, attack):
+	# the filmed screen sees armies move: an attack, or soldiers heading for a civ their owner is at war with or
+	# into foreign land, puts the camera on the unit as the order is given, so the walk and the fight play on screen
+	if not spectating() or not u.canAttack():
+		return
+	now = camClock()
+	owner = target.getOwner()
+	team = gc.getTeam(gc.getPlayer(u.getOwner()).getTeam())
+	hostile = owner >= 0 and owner != u.getOwner() and team.isAtWar(gc.getPlayer(owner).getTeam())
+	foreign = owner >= 0 and owner != u.getOwner()
+	army = u.getGroup().getNumUnits() >= 2
+	if not (attack or hostile or (foreign and army)):
+		return
+	if not attack and now - g_camera["at"] < MOVE_WATCH_GAP:
+		return
+	start = u.plot()
+	cam = CyCamera()
+	cam.JustLookAtPlot(start)
+	cam.SetZoom(0.5)
+	g_camera["at"], g_camera["turn_news"] = now, True
+	glide(start, target, 0.5, 0.48, EVENT_HOLD)
+	shotLabel([u.getOwner(), owner])
+
 def cameraHold(x, y):
 	# a shot chosen from outside (the studio): the camera goes there and the cameraman leaves it a while
 	plot = gc.getMap().plot(int(x), int(y))
@@ -1686,6 +1711,10 @@ def cmdMove(args):
 		turns = g.claudePathTurns(x, y)   # the game's pathfinder: terrain, roads, rivers, this unit's speed
 	had = loadClaims().get(u.getID())
 	setClaim(u.getID(), [x, y])
+	try:
+		watchMove(u, pl, bool(args.get("attack")))
+	except:
+		log("watch move FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 	g.pushMission(MissionTypes.MISSION_MOVE_TO, x, y, 0, False, True, MissionAITypes.NO_MISSIONAI, pl, u)
 	if (u.getX(), u.getY()) == before and g.getLengthMissionQueue() == 0 and before != (x, y):
 		# a refused order leaves no standing order behind (else the unit hook would try it again every turn)
