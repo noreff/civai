@@ -879,6 +879,9 @@ def main():
     if "--seat" in sys.argv:
         seat_setup(sys.argv[sys.argv.index("--game") + 1], sys.argv[sys.argv.index("--seat") + 1])
         cfg = dict(cfg, prompt="v2", shadow=False, **{k: v for k, v in SEAT.items() if k not in ("key", "player", "game")})
+        # the same named effort for every seat on routine wake-ups (deep ones: effort_deep); left unset, each
+        # harness would use its own default and the models would not be compared on equal terms
+        cfg.setdefault("effort", "medium")
     gid, d = game_dir()
     st = load_state(d)
     print("CIVAI loop on game %s (agent: %s)" % (gid, cfg["agent"][0]), flush=True)
