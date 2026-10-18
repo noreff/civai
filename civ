@@ -16,6 +16,7 @@
                            enemy units is an attack: refused with the odds unless --attack
   civ units                all our units, one per line (id, type, place, moves, level)
   civ actions <unit id>    what the unit can do right now (the game's own buttons)
+  civ spaceship [launch]    the Spaceship screen: parts, success chance, flight time, ships flying; launch
   civ espionage [<leader> <weight>]   espionage points against each leader, and how new points are split
                            (the Espionage screen); with a leader and a weight, sets that weight
   civ do <unit id> <action> [X Y | unit id | target] [--queue]   (LEAD <unit id>: a Great General joins
@@ -343,7 +344,7 @@ def units_by_tile(s, players):
 LOOKUPS = {"ping", "status", "map", "tile", "odds", "city", "unit", "player", "actions", "offers", "proposals",
            "tradeable", "relations", "victory", "rules", "area", "around", "where", "card", "chat", "events", "deals",
            "think", "director", "units"}
-SHOW_WITHOUT_ARGS = {"research", "budget", "religion", "civics", "gate", "hurry", "espionage"}
+SHOW_WITHOUT_ARGS = {"research", "budget", "religion", "civics", "gate", "hurry", "espionage", "spaceship"}
 
 
 def read_only(argv):
@@ -652,6 +653,8 @@ def main(argv):
             print(fmt_record(call("research", args)))
         elif cmd == "votes":
             print(fmt_record(call("votes")))
+        elif cmd == "spaceship":
+            print(fmt_record(call("spaceship", {"launch": len(argv) > 1 and argv[1] == "launch"})))
         elif cmd == "espionage":
             a = {}
             if len(argv) >= 3:

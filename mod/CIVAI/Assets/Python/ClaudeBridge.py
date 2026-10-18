@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 120
+BRIDGE_VERSION = 122
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3893,6 +3893,11 @@ def cmdVictory(args):
 	scores.reverse()
 	r = {"turn": "%d of %d" % (g.getGameTurn(), g.getMaxTurns() or g.getEstimateEndTurn()),
 		"scores": ", ".join(["%s %d" % (n, sc) for sc, n in scores])}
+	ships = ["%s arrives in %d turns" % (gc.getTeam(t).getName(), gc.getTeam(t).getVictoryCountdown(v))
+		for t in range(gc.getMAX_CIV_TEAMS()) for v in range(gc.getNumVictoryInfos())
+		if gc.getTeam(t).isAlive() and gc.getTeam(t).getVictoryCountdown(v) > 0]
+	if ships:
+		r["spaceships_flying"] = "; ".join(ships)
 	land = CyMap().getLandPlots()
 	for v in range(gc.getNumVictoryInfos()):
 		if not g.isVictoryValid(v):
@@ -4380,6 +4385,47 @@ def victoryVotes(vs):
 			out.append(line)
 	return out
 
+def cmdSpaceship(args):
+	# the Spaceship screen: our parts against what the game needs, the success chance, the flight time, every
+	# ship already flying (launches are announced to all), and the Launch button (launch=true)
+	iMe, iTeam = myIds()
+	g = gc.getGame()
+	team = gc.getTeam(iTeam)
+	out = {}
+	for v in range(gc.getNumVictoryInfos()):
+		if not g.isVictoryValid(v):
+			continue
+		parts = [p for p in range(gc.getNumProjectInfos()) if gc.getProjectInfo(p).getVictoryThreshold(v) > 0]
+		if not parts:
+			continue
+		rows = []
+		for p in parts:
+			k = gc.getProjectInfo(p)
+			rows.append("%s: %d built of %d (at least %d to launch)" % (k.getDescription(), team.getProjectCount(p),
+				k.getVictoryThreshold(v), k.getVictoryMinThreshold(v)))
+		flying = []
+		for t in range(gc.getMAX_CIV_TEAMS()):
+			c = gc.getTeam(t).getVictoryCountdown(v)
+			if gc.getTeam(t).isAlive() and c > 0:
+				flying.append("%s: arrives in %d turns" % (t == iTeam and "ours" or gc.getTeam(t).getName(), c))
+		r = {"parts": rows, "can_launch": team.canLaunch(v) and "yes" or "no",
+			"success_chance": "%d%%" % team.getLaunchSuccessRate(v),
+			"flight_turns": team.getVictoryDelay(v),
+			"ships_flying": flying or ["none"],
+			"how": "civ spaceship launch: the Launch button. Missing optional parts lower the success chance (a failed "
+				"ship is lost) and engines shorten the flight; the game is won when a ship arrives"}
+		if args.get("launch"):
+			if not team.canLaunch(v):
+				raise Exception("the ship can't be launched now: the game needs at least the parts marked above (or it is already flying)")
+			if not hasattr(gc.getPlayer(iMe), "claudeLaunch"):
+				raise Exception("launching needs the updated engine; tell the director")
+			if not gc.getPlayer(iMe).claudeLaunch(v):
+				raise Exception("the game refused the launch")
+			writeEvent("spaceship_launched", {"arrives_in": team.getVictoryCountdown(v), "success_chance": team.getLaunchSuccessRate(v)})
+			r["launched"] = "the ship is on its way: it arrives in %d turns" % team.getVictoryCountdown(v)
+		out[gc.getVictoryInfo(v).getDescription()] = r
+	return out or {"spaceship": "no space victory in this game"}
+
 def cmdEspionage(args):
 	# the Espionage screen: our points against each leader we know, and the weights that split new points
 	iMe, iTeam = myIds()
@@ -4696,6 +4742,17 @@ def seatTurnStart(turn):
 		p.setClaudeReady(False)
 	g = readGate()
 	reasons = list(g.get("attention") or []) + ["turn"]
+	# a spaceship launch is announced to every leader by the game: each seat hears of each launch once
+	heard = g.get("ships_heard") or []
+	for t in range(gc.getMAX_CIV_TEAMS()):
+		for v in range(gc.getNumVictoryInfos()):
+			c = gc.getTeam(t).getVictoryCountdown(v)
+			key = "%d:%d" % (t, v)
+			if gc.getTeam(t).isAlive() and c > 0 and key not in heard:
+				heard.append(key)
+				writeEvent("spaceship_launched", {"by": t == p.getTeam() and "us" or gc.getTeam(t).getName(),
+					"arrives_in_turns": c, "note": "the game is won when it arrives; taking its owner's capital destroys it"})
+	g["ships_heard"] = heard
 	g["on"] = True
 	g["ready_turn"] = -1
 	writeGate(g)
@@ -4938,6 +4995,7 @@ COMMANDS = {
 	"work": cmdWork,
 	"votes": cmdVotes,
 	"espionage": cmdEspionage,
+	"spaceship": cmdSpaceship,
 	"hurry": cmdHurry,
 	"ping": cmdPing,
 	"status": cmdStatus,

@@ -31,7 +31,8 @@ CHAT = os.path.join(BRIDGE, "chat.jsonl")
 WAKE_KINDS = ("message_from_player", "message_from_leader", "claude_wake", "player_waiting", "deal_done",
               "deal_declined", "deal_failed", "native_deal", "proposal")
 # kinds of wake-up (the brief's header, its closing and the effort follow the kind)
-ALARM_KINDS = ("first_contact", "war_declared", "peace_made", "city_changed_hands", "city_razed", "treasury_empty")
+ALARM_KINDS = ("first_contact", "war_declared", "peace_made", "city_changed_hands", "city_razed", "treasury_empty",
+               "spaceship_launched")
 AUDIENCE_KINDS = ("message_from_leader", "message_from_player", "proposal")
 AUDIENCE_PER_TURN = 3       # wake-ups outside a turn for messages and proposals, per turn (no endless ping-pong)
 COUNCIL_EVERY = {"GAMESPEED_QUICK": 8, "GAMESPEED_NORMAL": 10, "GAMESPEED_EPIC": 15, "GAMESPEED_MARATHON": 25}

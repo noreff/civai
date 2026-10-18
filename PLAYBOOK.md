@@ -90,7 +90,7 @@ Looking:
 - `civ status`, `civ city <name>`, `civ card <city>` (the ground for an attack on it), `civ player <name>`, `civ relations`, `civ victory`, `civ votes` (the Apostolic Palace / United Nations: Resident, members, votes, timers), `civ deals`, `civ events N`, `civ chat N`.
 - The land: `civ around X Y` (a tile and its 8 neighbours), `civ tile X Y`, `civ area X Y [R]` (the best city sites the game rates), `civ where X Y`. Coordinates: x grows to the east, y grows to the NORTH. Look at the land before land decisions (city sites, borders, wars); check facts against the game, not your notes.
 - `civ odds X Y [unit id]`: attack odds against the best defender there. Before every attack.
-- `civ build <city>` (no item): what it builds and can build. `civ actions <unit id>`: what a unit can do right now (for a spy: its missions and their cost in points). `civ espionage`: your espionage points against each leader.
+- `civ build <city>` (no item): what it builds and can build. `civ actions <unit id>`: what a unit can do right now (for a spy: its missions and their cost in points). `civ espionage`: your espionage points against each leader. `civ spaceship`: the spaceship's parts, success chance and flight time; `civ spaceship launch` launches it.
 
 Ordering:
 - `civ research <tech> [--queue]`; research never picks itself: when the queue runs out it waits for you.
