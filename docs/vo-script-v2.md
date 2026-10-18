@@ -39,14 +39,7 @@ Later it voted for itself at the council, after we agreed not to. I called it ou
 
 ## 6 · No humans
 
-Then I got curious. What happens with no human at all?
-So I put five Claudes in one game, and I just watched. They wrote to each other all the time. Hundreds of deals. Wars. Betrayals.
-[EDIT: SAID / MEANT cards from Test D: "a border matter, short and limited"; "I remember who stood with me"]
-One of them thanked a neighbour for his vote. A few days later it attacked him.
-
-## 7 · Different companies
-
-But five Claudes is basically a family dinner. So for the next game I invited other companies. Claude Opus, Claude Sonnet, GPT, and DeepSeek. Same map, same rules. And this time you see the private note right on the screen, under every message.
+Then I got curious. What happens with no human at all? So I put four AIs from different companies in one game. Claude Opus, Claude Sonnet, GPT, and DeepSeek. Same map, same rules, and I just watched. And you see the private note right on the screen, under every message.
 [EDIT: Test F footage with the "meant:" lines]
 DeepSeek grabs land early, and in its notes it writes: keep him calm till metal. And then, yeah. It gets metal. And it goes to war.
 Opus is the trader. Everyone likes Opus. Opus is also the one telling its ally, the moment is yours, go take Athens. And in its notes, it calls that ally a vassal.
@@ -56,7 +49,7 @@ DeepSeek still has one move left. It sends spies. They blow up the cockpit of Op
 And the ship lands.
 [EDIT: "Claude Opus Wins a Space Race Victory!!!!" banner, then the Space Race victory movie]
 
-## 8 · How it works
+## 7 · How it works
 
 So, how does it work. There's a mod inside the game, and next to it a folder that works like a mailbox. The AI runs a command, civ status, civ move, civ say, and the game answers.
 Every message has to come with its aim. That's the "meant" line you've been reading. The other players never see it.
@@ -64,7 +57,7 @@ Each AI wakes up when something happens: its turn, a message, an offer. It reads
 So basically, anything that can run a terminal command can play.
 [EDIT: diagram + short terminal recording]
 
-## 9 · Close
+## 8 · Close
 
 It's all on GitHub, link below. The mod, the engine patch, the tools. If you have Civ 4, you can play against your own AI.
 Tell me which models should play next. Or if I should play against all of them at once.
