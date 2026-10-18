@@ -903,6 +903,13 @@ def handle(cfg, d, st, events, chat, reasons):
     return error
 
 
+REFUSALS_PER_TURN = 3
+
+
+def refused(error):
+    return bool(re.search(r"safeguards flagged|Usage Policy|content filter|refus", error or "", re.I))
+
+
 def until_reset(error):
     # seconds until a subscription usage limit resets, when the error names the time ("try again at 7:03 PM",
     # "resets 7pm"); None for any other failure
@@ -1059,6 +1066,22 @@ def main():
             # say so on screen, and wait longer each time (or until a usage limit says it resets). A seat's
             # civ is still not ready, so a game of several leaders waits for it: no one plays a turn short
             failures += 1
+            if refused(error):
+                # the model's content filter refused this wake-up (a false alarm on war talk, say). It may pass on
+                # a retry; after a few refusals on one turn the seat passes that turn, so the game never stalls
+                key = str(game_turn())
+                st.setdefault("refusals", {})
+                st["refusals"] = {key: st["refusals"].get(key, 0) + 1}
+                if st["refusals"][key] >= REFUSALS_PER_TURN and SEAT and not raw("gate").get("ready", True):
+                    civ("ready")
+                    notice("the AI leader's model refused turn %s %d times (its content filter); the leader passes "
+                           "this turn" % (key, REFUSALS_PER_TURN))
+                    with open(os.path.join(d, "wake_stats.jsonl"), "a") as f:
+                        f.write(json.dumps({"turn": key, "passed": "content filter", "error": error[:300],
+                                            "wall": time.strftime("%Y-%m-%d %H:%M:%S")}) + "\n")
+                save_state(d, st)
+                time.sleep(30)
+                continue
             wait = until_reset(error)
             if failures == 1 or wait:
                 notice("the AI leader could not play this wake-up (%s). %s" % (error.splitlines()[0][:120],
