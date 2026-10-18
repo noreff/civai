@@ -142,9 +142,10 @@ def city_xy(name):
 
 
 def capital_xy(leader):
-    out = civ("py", "r = None\nfor i in range(gc.getMAX_CIV_PLAYERS()):\n"
+    # by the leader's real name: the game's own name now shows the model playing it
+    out = civ("py", "import ClaudeBridge as B\nr = None\nfor i in range(gc.getMAX_CIV_PLAYERS()):\n"
                     "    p = gc.getPlayer(i)\n"
-                    "    if p.isAlive() and %r.startswith(p.getName()) and not p.getCapitalCity().isNone():\n"
+                    "    if p.isAlive() and %r.startswith(B.realName(i)) and not p.getCapitalCity().isNone():\n"
                     "        r = (p.getCapitalCity().getX(), p.getCapitalCity().getY())\nresult = r" % leader)
     m = re.search(r"\((\d+), (\d+)\)", out)
     return m and (int(m.group(1)), int(m.group(2)))

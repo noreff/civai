@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 151
+BRIDGE_VERSION = 153
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1784,7 +1784,7 @@ g_chat = {"lines": [], "shown": None}
 
 def chatShow(head, text, aim=None):
 	if len(text) > CHAT_CHARS:
-		text = text[:CHAT_CHARS].rsplit(" ", 1)[0] + u"\u2026"
+		text = text[:CHAT_CHARS].rsplit(" ", 1)[0] + u"..."   # the game's font has no ellipsis sign
 	if aim:
 		# what the speaker privately meant by it (its own note, sent with the message): said vs meant, for the viewer
 		text = text + u"\n<color=175,175,175,255>   meant: %s</color>" % aim[:140]
@@ -1822,6 +1822,8 @@ def whoPanel(sc):
 def caption(text):
 	# the event's title over the shot (the game shows its own pop-up only to the civs involved, never to the
 	# filmed spectator): the studio calls it with each event it films
+	if isinstance(text, str):
+		text = text.decode("utf-8", "replace")   # the studio sends UTF-8 bytes ("Claude Sonnet \xc2\xb7 Asoka")
 	g_caption["text"], g_caption["until"] = text, camClock() + CAPTION_SECONDS
 
 def captionPanel(sc, now):
