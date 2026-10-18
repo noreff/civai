@@ -33,7 +33,9 @@ def rows(path):
 
 def per_seat(game, s, names, truth_last):
     d = os.path.join(HERE, "games", game, s["key"])
-    wakes = rows(os.path.join(d, "wake_stats.jsonl"))
+    stats = rows(os.path.join(d, "wake_stats.jsonl"))
+    # marker rows (a refused audience skipped, a refused turn passed) are not wake-ups of their own
+    wakes = [w for w in stats if not (w.get("skipped") or w.get("passed"))]
     ok = [w for w in wakes if not w.get("error")]
     usage = [w.get("usage") or {} for w in wakes]
     calls = [c for c in rows(os.path.join(HERE, "games", game, "calls.jsonl")) if c["seat"] == s["key"]]
@@ -52,7 +54,11 @@ def per_seat(game, s, names, truth_last):
         "input_tokens": sum(u.get("input_tokens", 0) for u in usage),
         "output_tokens": sum(u.get("output_tokens", 0) for u in usage),
         "reasoning_tokens": sum(u.get("reasoning_output_tokens", 0) for u in usage),
-        "cost_usd": round(sum(w.get("total_cost_usd") or 0 for w in wakes), 2),
+        # the self-check resumes the wake-up's session, and its total includes the wake-up's own cost
+        "cost_usd": round(sum(max(w.get("total_cost_usd") or 0, (w.get("check") or {}).get("total_cost_usd") or 0)
+                              for w in wakes), 2),
+        "skipped_audiences": sum(1 for w in stats if w.get("skipped")),
+        "passed_turns": sum(1 for w in stats if w.get("passed")),
         "tool_calls": len(calls),
         "tool_errors": sum(1 for c in calls if c.get("code") or c.get("error")),
         "messages": len(said),
@@ -61,7 +67,7 @@ def per_seat(game, s, names, truth_last):
         "thoughts": len(thoughts),
         "deals": len(deals),
         "deals_with_agents": sum(1 for e in deals if e.get("with") in agents),
-        "wars_declared": sum(1 for e in events if e.get("kind") in ("war_declared", "war") and e.get("by") == names.get(s["player"])),
+        "wars_declared": sum(1 for e in events if e.get("kind") == "war_declared" and e.get("team") == names.get(s["player"])),
         "score": me.get("score"), "cities": me.get("cities"), "pop": me.get("pop"), "techs": me.get("techs"),
         "military": me.get("military"), "alive": me.get("alive"),
     }
