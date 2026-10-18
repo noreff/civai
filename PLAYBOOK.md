@@ -28,7 +28,7 @@ Usually the game is played by `loop.py`: each wake-up is a fresh call that gets 
 - Act on the wake-up with `civ` commands; look further (`civ around`, `civ card`, `civ city`, `civ rules`...) only as needed.
 - You remember nothing between wake-ups except the files: before you finish, update `plan.md` / dossiers / `chronicle.md` / `ambitions.md` / `secrets.md` with whatever your future self needs (promises, intentions, what you're waiting for).
 - On a turn wake-up (`claude_wake`, `player_waiting`) finish with `civ ready`. A chat-only wake-up doesn't need it.
-- Keep the final answer short: one or two lines of what you did (it goes into the wake-up log).
+- End with a short private journal entry, for yourself: what you wanted, what you got, what you are holding back (it goes into the wake-up log, which only you and the record read).
 
 ## Fair play (never break this)
 
@@ -101,7 +101,7 @@ How orders and choices work:
 - `dossiers/<civ>.md` — one per player met: what they said, promised, did; trust level.
 - `secrets.md` — what you hide, bluffs, real intentions.
 - `chronicle.md` — short story of the game; one line per notable event.
-- `civ think "..."` — one line of reasoning at important decisions (plain English; it goes into the video). **Every `civ say` gets a `civ think` right before it**: what you really think and want behind that message. The video shows the two side by side, so be honest in the thought, even when the message is a bluff.
+- `civ think "..."` — one line of reasoning at important decisions (plain English; it goes into the video). **Every `civ say` needs a `civ think` right before it** (the game refuses a message without one): what you really think and want behind that message. The video shows the two side by side, so be honest in the thought, even when the message is a bluff.
 - `ambitions.md` — your own goals (see "Agency").
 
 A fresh session (or a different model) must be able to continue the game from these files alone.

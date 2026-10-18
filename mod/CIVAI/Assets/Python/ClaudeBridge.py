@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 67
+BRIDGE_VERSION = 68
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3109,6 +3109,9 @@ def answerProposal(n, yes, why=None):
 	if yes and (gives or wants):
 		executeDeal(v["from"], iMe, gives, wants)
 		done.append("deal made")
+		# our side of it, for the ledger: we gave what they wanted, we got what they gave
+		writeEvent("deal_done", {"with": pname(v["from"]), "gave": [itemText(x) for x in wants],
+			"got": [itemText(x) for x in gives], "their_proposal": int(n)})
 	if ai.isHuman() and why != "no answer in time":
 		CyInterface().addMessage(v["from"], True, gc.getEVENT_MESSAGE_TIME() * 3,
 			u"<font=4><color=255,200,60,255>%s %s your offer.</color></font>" % (gc.getPlayer(iMe).getName(),

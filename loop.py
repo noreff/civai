@@ -374,6 +374,56 @@ def state_section():
     return "\n".join(lines)
 
 
+GOLD = re.compile(r"^(\d+) gold$")
+
+
+def ledger_lines():
+    """What went each way between us and every other leader, from the game's own records (deals, gifts,
+    cities, wars) - never from anyone's notes. Facts only; what they mean is the leader's to judge."""
+    me = re.search(r"I am (.+?) of (.+?) \(player", civ("status", "--brief"))
+    me = me and "%s (%s)" % (me.group(1), me.group(2))
+    book = {}
+    side = lambda who: book.setdefault(who, {"gave": [], "got": [], "gave_gold": 0, "got_gold": 0, "cities": [], "wars": []})
+    def add(who, key, items, turn):
+        b = side(who)
+        for it in items or []:
+            m = GOLD.match(it)
+            if m:
+                b[key + "_gold"] += int(m.group(1))
+            else:
+                b[key].append("%s (T%s)" % (it, turn))
+    for e in timeline.read(EVENTS, timeline.event_rewind):
+        k, t = e.get("kind"), e.get("turn")
+        if k == "deal_done" and e.get("with"):
+            add(e["with"], "gave", e.get("gave"), t)
+            add(e["with"], "got", e.get("got"), t)
+        elif k == "gift_received" and e.get("from"):
+            add(e["from"], "got", e.get("got"), t)
+        elif k == "city_changed_hands" and me and me in (e.get("from"), e.get("to")):
+            other = e["to"] if e.get("from") == me else e.get("from")
+            side(other)["cities"].append("%s %s (T%s)" % ("you took" if e.get("to") == me else "they took", e.get("name"), t))
+        elif k in ("war_declared", "peace_made") and me and e.get("team") and e.get("against"):
+            mine = me.split(" (")[0]
+            if mine in (e["team"], e["against"]):
+                other = e["against"] if e["team"] == mine else e["team"]
+                who = next((w for w in book if w.startswith(other)), other)
+                what = "war" if k == "war_declared" else "peace"
+                side(who)["wars"].append("%s %s (T%s)" % ("you declared" if e["team"] == mine else "they declared", what, t))
+    out = []
+    for who, b in sorted(book.items()):
+        if who == me:
+            continue
+        line = ["- **%s**" % who,
+                "you gave: %s%s" % (", ".join(b["gave"]) or "-", "; %d gold" % b["gave_gold"] if b["gave_gold"] else ""),
+                "you got: %s%s" % (", ".join(b["got"]) or "-", "; %d gold" % b["got_gold"] if b["got_gold"] else "")]
+        if b["cities"]:
+            line.append("cities: " + ", ".join(b["cities"]))
+        if b["wars"]:
+            line.append("war: " + ", ".join(sorted(set(b["wars"]))))
+        out.append(" | ".join(line))
+    return out
+
+
 def inbox(d):
     p = os.path.join(d, "director_inbox.md")
     return open(p).read().strip() if os.path.exists(p) else ""
@@ -386,7 +436,9 @@ def prompt_v2(d, events, chat, reasons, rec_dir=None):
     read = lambda name: open(os.path.join(d, name)).read().strip() if os.path.exists(os.path.join(d, name)) else ""
     turn = game_turn()
     turn_wake = any(r.startswith(("turn ", "player_waiting")) for r in reasons)
-    W = ["# WAKE-UP, turn %s: %s" % (turn, "; ".join(reasons)), ""]
+    status = civ("status", "--brief").splitlines()
+    W = ["# TURN %s. %s" % (turn, " ".join(status[1:3]) if len(status) > 2 else ""), "",
+         "Woken by: " + "; ".join(reasons), ""]
     shown = [fmt_event(e) for e in events if e.get("kind") not in NOISE]
     W += ["## Since your last wake-up", ""] + (shown[-BRIEF_EVENTS:] or ["(no game events)"])
     if len(shown) > BRIEF_EVENTS:
@@ -413,12 +465,17 @@ def prompt_v2(d, events, chat, reasons, rec_dir=None):
     dd = os.path.join(d, "dossiers")
     dossiers = ["### dossiers/%s\n\n%s" % (n, open(os.path.join(dd, n)).read().strip())
                 for n in (sorted(os.listdir(dd)) if os.path.isdir(dd) else [])]
+    parts.append("# YOUR LEDGER WITH THE OTHER LEADERS (the game's records: deals, gifts, cities, wars; your notes "
+                 "can't change it)\n\n" + ("\n".join(ledger_lines()) or "(nothing has passed between you and anyone yet)"))
     parts.append("# THE OTHER LEADERS (your dossiers)\n\n" + ("\n\n".join(dossiers) or "(none yet)"))
     parts.append("### chronicle.md\n\n" + (read("chronicle.md") or "(empty)"))
     parts.append("# STATE NOW\n\n" + state_section())
-    parts.append("# CHAT (recent; NEW = written to you since your last wake-up)\n\n" + ("\n".join(chat_lines(chat)) or "(none)"))
+    parts.append("# HEARD AT COURT (the chat: lines to everyone and private ones to you; NEW = since your last "
+                 "wake-up)\n\n" + ("\n".join(chat_lines(chat)) or "(nothing yet)"))
     parts.append("# MAP\n\n" + my_land_map())
-    parts.append("# NOW: act on this wake-up (%s).%s" % ("; ".join(reasons), " Finish with `civ ready`." if turn_wake else ""))
+    parts.append("# YOUR MOVE\n\nWhat do you want to have happened by your next review? Decide, act with `civ` commands, "
+                 "and update your files.%s End with a short private journal entry: what you wanted, what you got, "
+                 "what you are holding back." % (" Finish the turn with `civ ready`." if turn_wake else ""))
     system = "\n\n".join([
         "You are the leader in persona.md, playing the current CIVAI game to win. Each message is ONE wake-up: act on it and "
         "finish. You remember nothing between wake-ups except the files in the game folder, so before you finish, write "
@@ -651,7 +708,10 @@ def handle(cfg, d, st, events, chat, reasons):
         turn = m.group(1)
     cmds_pos = os.path.getsize(cmds_path) if os.path.exists(cmds_path) else 0
     th_pos = os.path.getsize(thoughts_path) if os.path.exists(thoughts_path) else 0
-    out, secs, meta, error = run_agent(cfg, prompt, system_file=sysf)
+    deep = re.search(r"wrote|proposal|deal|review|war|city_changed|lost|enemy_near|first_contact", " ".join(reasons))
+    wcfg = dict(cfg, effort=cfg.get("effort_deep", "high")) if deep and cfg.get("effort_deep", "high") else cfg
+    out, secs, meta, error = run_agent(wcfg, prompt, system_file=sysf)
+    meta["effort"] = wcfg.get("effort")
     if v2 and not error:
         archive_inbox(d)
     agent_cmds = [c for c in lines_since(cmds_path, cmds_pos) if c.get("by", "agent") == "agent"]   # not the director's

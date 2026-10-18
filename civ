@@ -635,6 +635,11 @@ def main(argv):
         elif cmd == "release":
             print(fmt_record(call("release", {"id": argv[1] if argv[1] == "all" else int(argv[1])})))
         elif cmd == "say":
+            if not os.path.exists(os.path.join(VIDEO_LOG_DIR, ".last_thought")):
+                # every message is paired with what its speaker really thinks (said vs thought, for the video and the record)
+                print('ERROR: first write what you really think and want behind this message: civ think "..." '
+                      '(private; then civ say)', file=sys.stderr)
+                return 1
             popup = len(argv) > 1 and argv[1] == "--popup"
             to = argv[2] if len(argv) > 2 and argv[1] == "--to" else None
             text = " ".join(argv[3 if to else 2 if popup else 1:])
