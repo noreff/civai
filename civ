@@ -572,7 +572,15 @@ def main(argv):
             print("unknown command: %s\n\n%s" % (cmd, __doc__.strip()), file=sys.stderr)
             return 2
     except BridgeError as e:
-        print("ERROR: %s" % e, file=sys.stderr)
+        text = str(e)
+        if os.environ.get("CIV_DEV") != "1":
+            # the player gets the game's answer, not the bridge's Python traceback
+            lines = [l.strip() for l in text.splitlines() if l.strip()]
+            text = lines[-1] if lines else text
+            for prefix in ("Exception: ", "ValueError: ", "KeyError: "):
+                if text.startswith(prefix):
+                    text = text[len(prefix):]
+        print("ERROR: %s" % text, file=sys.stderr)
         return 1
     return 0
 
