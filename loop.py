@@ -62,7 +62,12 @@ def seat_setup(game, key):
 
 
 def seat_dir():
-    return os.path.join(HERE, "games", SEAT["game"], SEAT["key"])
+    d = os.path.join(HERE, "games", SEAT["game"], SEAT["key"])
+    ign = os.path.join(d, ".gitignore")
+    if os.path.isdir(d) and not os.path.exists(ign):
+        # the seat's memory history keeps notes and logs, never tokens, logins or harness sessions
+        open(ign, "w").write(".seat_token\n.system_prompt.md\n.codex-home/\n.pi-sessions/\n.last_thought\n")
+    return d
 
 
 def sandbox_profile():
@@ -76,10 +81,19 @@ def sandbox_profile():
             os.path.join(home, ".claude", "projects"), os.path.join(home, ".codex"),
             os.path.join(home, ".pi", "agent", "sessions"), os.path.join(home, "research"),
             "/private/tmp/claude-501/-Users-volod"]   # the director's own sessions; a seat's Claude keeps its temp dir
-    allow = [own, claude_own, CODEX_HOME]
+    allow = [own, claude_own]
     q = lambda p: '(subpath "%s")' % os.path.realpath(p).replace('"', '\\"')
     text = "(version 1)\n(allow default)\n(deny file-read* file-write* %s)\n(allow file-read* file-write* %s)\n" % (
         " ".join(q(p) for p in deny), " ".join(q(p) for p in allow))
+    # the folders above the seat's own: their attributes only (tools resolve full paths), never a listing or a file
+    up, parents = os.path.realpath(own), []
+    while os.path.dirname(up) != up:
+        up = os.path.dirname(up)
+        parents.append(up)
+    text += "(allow file-read-metadata %s)\n" % " ".join('(literal "%s")' % x for x in parents)
+    if SEAT.get("harness") == "codex":
+        # only the GPT seat may use the ChatGPT login file, and nothing else in ~/.codex
+        text += '(allow file-read* file-write* (literal "%s"))\n' % os.path.realpath(os.path.join(home, ".codex", "auth.json"))
     path = os.path.join(HERE, "run", "sandbox-%s.sb" % SEAT["key"])
     os.makedirs(os.path.dirname(path), exist_ok=True)
     open(path, "w").write(text)
@@ -491,15 +505,17 @@ CODEX_HOME = os.path.join(HERE, "out", "codex-home")   # a clean Codex config: t
 
 
 def codex_home():
-    # the user's ChatGPT login is linked, never copied; everything else is empty so every seat starts equal
-    os.makedirs(CODEX_HOME, exist_ok=True)
-    link = os.path.join(CODEX_HOME, "auth.json")
+    # the user's ChatGPT login is linked, never copied; everything else is empty so every seat starts equal.
+    # A seat keeps its own Codex home (its sessions are its private thoughts) inside its folder.
+    home = os.path.join(seat_dir(), ".codex-home") if SEAT else CODEX_HOME
+    os.makedirs(home, exist_ok=True)
+    link = os.path.join(home, "auth.json")
     if not os.path.lexists(link):
         os.symlink(os.path.expanduser("~/.codex/auth.json"), link)
-    conf = os.path.join(CODEX_HOME, "config.toml")
+    conf = os.path.join(home, "config.toml")
     if not os.path.exists(conf):
         open(conf, "w").write("# CIVAI seat: no MCP servers, no project docs\nproject_doc_max_bytes = 0\n")
-    return CODEX_HOME
+    return home
 
 
 def harness_of(cfg):
