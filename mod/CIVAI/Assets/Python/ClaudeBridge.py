@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 79
+BRIDGE_VERSION = 81
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -323,7 +323,9 @@ def riverEdges(pl):
 TIMELINE_FILE = OUT_DIR + "\\timeline.json"
 
 def rewindCheck():
-	# an older save loaded: orders, build lists and questions from the later timeline must not replay
+	# a save was loaded. A save holds the start of its turn, so loading the same turn again also throws away
+	# what happened in it since: orders, build lists, questions and log lines of this turn and later never
+	# happened in the game being played now (only a later save loses nothing)
 	now = gc.getGame().getGameTurn()
 	last = -1
 	if os.path.exists(TIMELINE_FILE):
@@ -333,8 +335,14 @@ def rewindCheck():
 		finally:
 			f.close()
 	writeAtomic(TIMELINE_FILE, toJson({"turn": now}))
-	if last <= now:
+	if last < now:
 		return
+	if seatsConfigured():
+		forEachSeat(rewindSeat, last, now)
+	else:
+		rewindSeat(last, now)
+
+def rewindSeat(last, now):
 	c = loadClaims()
 	for k in c.keys():
 		c[k]["target"] = None
@@ -360,9 +368,9 @@ def rewindCheck():
 		f.write(toJson({"from": "system", "rewind_to": now, "turn": now, "text": "", "time": time.strftime("%H:%M:%S")}) + "\n")
 	finally:
 		f.close()
-	writeEvent("rewind", {"from_turn": last, "to_turn": now, "wall": wall, "note": "an older save was loaded: unit orders, "
-		"build lists and open questions from the later turns were cleared; your memory files may describe turns "
-		"that haven't happened in this replay"})
+	writeEvent("rewind", {"from_turn": last, "to_turn": now, "wall": wall, "note": "a save from the start of turn %d was "
+		"loaded: what happened from then on (orders, builds, units made, open questions) did not happen in this game; "
+		"your memory files may describe it" % now})
 
 def dump(reason):
 	if reason == "load_game":
@@ -1363,9 +1371,16 @@ def myUnit(uid):
 		raise Exception("I have no unit #%s" % uid)
 	return u
 
+def alone(u, args):
+	# an order for one unit is that unit's own: it leaves the stack it is in (the built-in AI grouped
+	# units, e.g. a settler with its escort, and the stack followed one unit's orders), unless --stack
+	if not args.get("stack") and u.getGroup().getNumUnits() > 1 and hasattr(u, "claudeLeaveGroup"):
+		u.claudeLeaveGroup()
+
 def cmdMove(args):
-	# order a unit (with its whole group) to walk to x, y; multi-turn paths are fine
+	# order a unit to walk to x, y (alone, or with its stack: --stack); multi-turn paths are fine
 	u = myUnit(args["id"])
+	alone(u, args)
 	x = int(args["x"])
 	y = int(args["y"])
 	pl = CyMap().plot(x, y)
@@ -1768,6 +1783,8 @@ def cmdDo(args):
 		raise Exception("%s #%d can't %s here now. It can: %s" % (gc.getUnitInfo(u.getUnitType()).getDescription(),
 			u.getID(), want, ", ".join([n for (n, a, t) in acts])))
 	name, a, targeted = match[0]
+	if name != "LEAD":
+		alone(u, args)
 	g = u.getGroup()
 	m, c, au = a.getMissionType(), a.getCommandType(), a.getAutomateType()
 	if name == "LEAD":
@@ -3984,6 +4001,14 @@ def humanTurn():
 			return t
 	return t + 1
 
+def ensureSimultaneousTurns():
+	# several agents play each turn at once (like a simultaneous-turns multiplayer game): every civ's turn
+	# is active together, so an agent's order runs when given, not after the civs before it are done
+	g = gc.getGame()
+	if seatsConfigured() and hasattr(g, "claudeSetSimultaneousTurns") and not g.claudeSimultaneousTurns():
+		g.claudeSetSimultaneousTurns(True)
+		log("simultaneous turns on")
+
 def seatsOnLoad():
 	# a loaded save does not remember which agents were done: hold every agent's civ and wake it for this turn,
 	# or the game would play the turn without them
@@ -4328,6 +4353,10 @@ def poll():
 			os.makedirs(REPLY_DIR)
 		names = [n for n in os.listdir(IN_DIR) if n.endswith(".json")]
 		if gameReady():
+			try:
+				ensureSimultaneousTurns()
+			except:
+				log("simultaneous turns FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 			try:
 				spectatorView()
 			except:

@@ -795,7 +795,7 @@ def until_reset(error):
     # seconds until a subscription usage limit resets, when the error names the time ("try again at 7:03 PM",
     # "resets 7pm"); None for any other failure
     import re
-    m = re.search(r"(?:try again at|resets(?: at)?)\s+(\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])", error or "")
+    m = re.search(r"(?:try again at|resets(?: at)?)[^.]*?(\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])", error or "")
     if not m or "limit" not in error.lower():
         return None
     h, mi = int(m.group(1)) % 12 + (12 if m.group(3).lower() == "pm" else 0), int(m.group(2) or 0)
