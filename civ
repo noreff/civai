@@ -11,8 +11,9 @@
   civ city <name>          a city: full detail if mine, what I can see if not
   civ unit <id>            one of my units
   civ player <name|civ|id> a player I have met
-  civ move <id> X Y [--stack]  walk a unit to X Y (several turns if needed); the unit becomes yours.
-                           It leaves any stack it is in; --stack moves the whole stack with it
+  civ move <id> X Y [--stack] [--attack]  walk a unit to X Y (several turns if needed); the unit becomes yours.
+                           It leaves any stack it is in; --stack moves the whole stack with it. A tile with
+                           enemy units is an attack: refused with the odds unless --attack
   civ actions <unit id>    what the unit can do right now (the game's own buttons)
   civ do <unit id> <action> [X Y | unit id] [--queue]   (LEAD <unit id>: a Great General joins that unit)
                            do one: FORTIFY, SENTRY, FOUND, BUILD_FARM, BUILD_ROAD, PILLAGE,
@@ -547,7 +548,7 @@ def main(argv):
         elif cmd == "move":
             words = [a for a in argv[1:] if not a.startswith("--")]
             print(fmt_record(call("move", {"id": int(words[0]), "x": int(words[1]), "y": int(words[2]),
-                                           "stack": "--stack" in argv})))
+                                           "stack": "--stack" in argv, "attack": "--attack" in argv})))
         elif cmd == "py":
             print(call("exec", {"code": " ".join(argv[1:]) if len(argv) > 1 else sys.stdin.read()})["value"])
         elif cmd == "ready":

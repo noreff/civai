@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 101
+BRIDGE_VERSION = 102
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1438,6 +1438,15 @@ def cmdMove(args):
 	pl = CyMap().plot(x, y)
 	if pl.isNone():
 		raise Exception("no such tile %d,%d" % (x, y))
+	if not args.get("attack") and pl.isVisibleEnemyUnit(u.getOwner()):
+		# moving onto an enemy is an attack (the game's rule); a human sees the odds before clicking
+		dfd = pl.getBestDefender(-1, u.getOwner(), u, True, False, False)
+		odds = ""
+		if dfd is not None and not dfd.isNone() and u.canAttack():
+			odds = ": %s of %s defends, win odds %.1f%%" % (gc.getUnitInfo(dfd.getUnitType()).getDescription(),
+				pname(dfd.getOwner()), getCombatOdds(u, dfd) / 10.0)
+		raise Exception("%d,%d holds enemy units, so this move would attack%s. Add --attack to attack, or move "
+			"next to it (`civ odds %d %d` for every unit in reach)" % (x, y, odds, x, y))
 	g = u.getGroup()
 	before = (u.getX(), u.getY())
 	turns = -1
