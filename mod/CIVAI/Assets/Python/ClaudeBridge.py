@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 168
+BRIDGE_VERSION = 169
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1873,12 +1873,15 @@ def deliverChat(frm, text, to, aim=None):
 				writeEvent("message_from_leader", {"from": pname(frm), "text": text, "private": to is not None})
 		finally:
 			actAs(prev)
-	# the screen (a human player, or the spectator whose screen is filmed) shows every line: the video sees all
-	# channels. The speaker in his civ's colour; a private line says to whom and that it is private
+	# the spectator's filmed screen shows every line (the video sees all channels); a human who plays sees only
+	# what reaches him: lines to all, to him, and his own. The speaker in his civ's colour; a private line says to
+	# whom and that it is private
 	head = to is None and u"%s to all" % colored(frm, shown(frm)) or \
 		u"%s to %s  <color=170,170,170,255>(private)</color>" % (colored(frm, shown(frm)), colored(to, shown(to)))
 	line = u"<font=4>%s:  <color=255,235,180,255>%s</color></font>" % (head, text)   # the message panel wraps it
 	for i in humanPlayers():
+		if to is not None and i not in (to, frm) and not spectating():
+			continue
 		CyInterface().addMessage(i, True, gc.getEVENT_MESSAGE_TIME() * 4, line, "",
 			InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
 	if spectating():
