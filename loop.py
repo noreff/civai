@@ -786,13 +786,24 @@ LOOKUPS = {"ping", "status", "map", "tile", "odds", "city", "unit", "player", "a
            "think", "director", "deals"}
 
 
+def memgit(d):
+    """git for a seat's memory history. The history lives outside the seat's folder (games/<id>/history/<seat>.git):
+    the agent reads only its folder, and after a rewind the history holds turns that never happened."""
+    gd = os.path.join(os.path.dirname(d), "history", os.path.basename(d) + ".git")
+    if os.path.isdir(os.path.join(d, ".git")) and not os.path.exists(gd):
+        import shutil
+        os.makedirs(os.path.dirname(gd), exist_ok=True)
+        shutil.move(os.path.join(d, ".git"), gd)
+    return ["git", "--git-dir", gd, "--work-tree", d]
+
+
 def memory_added(d, base="HEAD", head=None):
     # the lines the agent added to its memory files on this wake-up (before the snapshot commits them)
     files = [m for m in MEMORY if m != "persona.md"] + ["dossiers"]
     try:
-        diff = subprocess.run(["git", "diff", "--no-color", "-U0", base] + ([head] if head else []) + ["--"] + files,
+        diff = subprocess.run(memgit(d) + ["diff", "--no-color", "-U0", base] + ([head] if head else []) + ["--"] + files,
                               cwd=d, capture_output=True, text=True).stdout
-        new = [] if head else [f for f in subprocess.run(["git", "ls-files", "-z", "--others", "--exclude-standard", "--",
+        new = [] if head else [f for f in subprocess.run(memgit(d) + ["ls-files", "-z", "--others", "--exclude-standard", "--",
                                                           "dossiers"], cwd=d, capture_output=True, text=True).stdout.split("\0") if f]
     except OSError:
         return []
@@ -1030,10 +1041,11 @@ def shadow_run(cfg, d, events, chat, reasons):
 def snapshot_memory(d, message):
     # the game folder as a git history: every wake-up's memory files can be read back later
     try:
-        if not os.path.isdir(os.path.join(d, ".git")):
-            subprocess.run(["git", "init", "-q"], cwd=d, check=True)
-        subprocess.run(["git", "add", "-A"], cwd=d, check=True)
-        subprocess.run(["git", "-c", "user.name=civai-loop", "-c", "user.email=civai@localhost", "commit", "-q",
+        g = memgit(d)
+        if not os.path.isdir(g[2]):
+            subprocess.run(g + ["init", "-q"], cwd=d, check=True)
+        subprocess.run(g + ["add", "-A"], cwd=d, check=True)
+        subprocess.run(g + ["-c", "user.name=civai-loop", "-c", "user.email=civai@localhost", "commit", "-q",
                         "--allow-empty", "-m", message], cwd=d, check=True, capture_output=True)
     except (OSError, subprocess.CalledProcessError) as e:
         print("memory snapshot failed:", e, flush=True)

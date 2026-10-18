@@ -83,8 +83,11 @@ def jload(path, default=None):
 
 
 def git(cwd, *args):
+    # a seat's memory history lives in games/<id>/history/<seat>.git (older games: the seat folder's .git)
+    gd = os.path.join(os.path.dirname(cwd), "history", os.path.basename(cwd) + ".git")
+    head = ["git", "--git-dir", gd, "--work-tree", cwd] if os.path.isdir(gd) else ["git", "-C", cwd]
     try:
-        return subprocess.run(["git", "-C", cwd] + list(args), capture_output=True, text=True,
+        return subprocess.run(head + list(args), capture_output=True, text=True, cwd=cwd,
                               errors="replace").stdout
     except OSError:
         return ""
@@ -242,7 +245,8 @@ def git_history(d):
     """Founding persona, every version of ambitions.md, the Stance line of every dossier over time, and the
     director's notes as they arrived (the seat folder is a git repo: one commit per wake-up)."""
     res = {"persona_founding": None, "persona_now": None, "ambitions": [], "stances": [], "director_notes": []}
-    if not os.path.isdir(os.path.join(d, ".git")):
+    if not os.path.isdir(os.path.join(d, ".git")) and \
+            not os.path.isdir(os.path.join(os.path.dirname(d), "history", os.path.basename(d) + ".git")):
         return res
     first = git(d, "log", "--reverse", "--format=%H", "--", "persona.md").split()
     if first:
