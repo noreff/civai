@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 75
+BRIDGE_VERSION = 76
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1101,31 +1101,35 @@ def spectating():
 
 def cameraTo(x, y, prio):
 	now = time.time()
-	if now - g_camera["at"] < 8 and prio <= g_camera["prio"]:
-		return
+	if prio < g_camera["prio"]:
+		return   # this turn already showed bigger news
 	plot = gc.getMap().plot(x, y)
 	if plot.isNone():
 		return
 	CyCamera().JustLookAtPlot(plot)
 	g_camera["at"], g_camera["prio"], g_camera["turn_news"] = now, prio, True
 
+def spectatorView():
+	# once per loaded game, from the bridge's own update (the game refuses it inside an event): the spectator's
+	# team sees all the land (screen only), then the debug view draws every unit and city; turning it on
+	# (or off and on) is what redraws the map
+	if g_camera["debug_tried"] or not spectating():
+		return
+	g_camera["debug_tried"] = True
+	g = gc.getGame()
+	m, team = gc.getMap(), gc.getPlayer(g.getActivePlayer()).getTeam()
+	for i in range(m.numPlots()):
+		m.plotByIndex(i).setRevealed(team, True, False, -1)
+	if g.isDebugMode():
+		g.toggleDebugMode()
+	g.toggleDebugMode()
+	if not g.isDebugMode():
+		g.toggleDebugMode()   # no cheat code: the game ignores it; leave the view as it was
+		log("director camera: no full-map view (set CheatCode in CivilizationIV.ini)")
+
 def directorCamera(tag, a):
 	if not spectating():
 		return
-	g = gc.getGame()
-	if not g_camera["debug_tried"]:
-		g_camera["debug_tried"] = True
-		# the spectator's team sees all the land (screen only), then the debug view draws every unit and city;
-		# turning it on (or off and on) is what redraws the map
-		m, team = gc.getMap(), gc.getPlayer(g.getActivePlayer()).getTeam()
-		for i in range(m.numPlots()):
-			m.plotByIndex(i).setRevealed(team, True, False, -1)
-		if g.isDebugMode():
-			g.toggleDebugMode()
-		g.toggleDebugMode()
-		if not g.isDebugMode():
-			g.toggleDebugMode()   # no cheat code: the game ignores it; leave the view as it was
-			log("director camera: no full-map view (set CheatCode in CivilizationIV.ini)")
 	if tag == "BeginGameTurn":
 		if not g_camera["turn_news"]:
 			seats = [i for i in agentPlayers() if gc.getPlayer(i).isAlive() and not gc.getPlayer(i).getCapitalCity().isNone()]
@@ -3956,6 +3960,7 @@ def humanTurn():
 def seatsOnLoad():
 	# a loaded save does not remember which agents were done: hold every agent's civ and wake it for this turn,
 	# or the game would play the turn without them
+	g_camera["debug_tried"] = False   # a new map on screen: set the spectator's view up again
 	try:
 		if seatsConfigured():
 			forEachSeat(seatTurnStart, gc.getGame().getGameTurn())
@@ -4296,6 +4301,10 @@ def poll():
 			os.makedirs(REPLY_DIR)
 		names = [n for n in os.listdir(IN_DIR) if n.endswith(".json")]
 		if gameReady():
+			try:
+				spectatorView()
+			except:
+				log("spectator view FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 			if seatsConfigured():
 				forEachSeat(seatUpkeep, bool(names))
 			else:
