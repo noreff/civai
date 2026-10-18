@@ -601,9 +601,11 @@ def run_agent(cfg, prompt, resume=None, system_file=SYSTEM_FILE, extra_env=None)
     cwd = HERE
     if SEAT:
         # the seat's own copy of the system prompt: the sandbox lets the harness read only the seat's folder
+        import broker
         own = os.path.join(seat_dir(), ".system_prompt.md")
-        open(own, "w").write(open(system_file).read())
+        open(own, "w").write(broker.neutral(open(system_file).read()))
         system_file = own
+        prompt = broker.neutral(prompt)   # the same neutral internal names as the seat's tools give
     cmd, henv = agent_command(cfg, system_file, resume)
     stdin = None if any("{prompt}" in a for a in cfg["agent"]) and h not in ("codex", "pi") else prompt
     if stdin is None:
