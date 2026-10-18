@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 89
+BRIDGE_VERSION = 90
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -3910,6 +3910,10 @@ def cmdResearch(args):
 				suggest(args["tech"], gc.getNumTechInfos(), gc.getTechInfo)))
 		if gc.getTeam(p.getTeam()).isHasTech(i):
 			raise Exception("we already know %s" % techName(i))
+		if not args.get("queue"):
+			# research it now: the game's pushResearch ignores a tech that is already somewhere in the queue,
+			# so the queue is cleared first (the new tech and its missing prerequisites become the queue)
+			p.clearResearchQueue()
 		p.pushResearch(i, not args.get("queue"))
 		if not p.isResearchingTech(i):
 			raise Exception("can't research %s (missing prerequisites we can't research yet?)" % techName(i))
