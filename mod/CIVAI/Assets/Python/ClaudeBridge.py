@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 99
+BRIDGE_VERSION = 100
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -2224,6 +2224,10 @@ def cmdReligion(args):
 def ownCivicsLock(p):
 	# the game's rule after Claude's own change (anarchy, then MIN_REVOLUTION_TURNS); a lock the
 	# built-in AI caused with a revolution the bridge undid doesn't count
+	if engineControl():
+		# the engine keeps the built-in AI out of our civics, so the game's own timers are ours, and a save
+		# restores them with everything else (the bridge's record would outlive a reload)
+		return max(0, p.getRevolutionTimer(), p.getAnarchyTurns())
 	c = loadChoices() or {}
 	now = gc.getGame().getGameTurn()
 	return max(0, int(c.get("own_lock_until", 0)) - now, int(c.get("own_anarchy_until", 0)) - now)
