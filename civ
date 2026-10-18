@@ -203,6 +203,10 @@ def land_name(owner, players):
 def fmt_status(s, compact=False):
     me = s["me"]
     players = {p["id"]: p for p in s["players"]}
+    if me not in players:
+        # the game lists only living civilizations: ours has no cities and no units left
+        return "Turn %d, %s. Your civilization has fallen: it has no cities and no units left, and is out of the game." % (
+            s["turn"], year(s["year"]))
     mep, emp = players[me], s["my_empire"]
     out = ["Turn %d, %s. I am %s of %s (player %d)." % (
         s["turn"], year(s["year"]), mep["name"], mep["civ"], me)]

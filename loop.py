@@ -458,9 +458,18 @@ def council_every(cfg):
     return 10
 
 
+def fallen():
+    # the game lists only living civilizations: a seat missing from its own status has no cities and no units left
+    s = raw("status")
+    return bool(s.get("players")) and s.get("me") not in [p.get("id") for p in s["players"]]
+
+
 def wake_kind(d, events, reasons, st, turn, cfg):
     """founding (no persona yet), council (every few turns, or a turn with big news), audience (someone wrote
-    or asks), or turn. Decided here from the events, whatever the bridge's gate settings are."""
+    or asks), turn, or fall (the civilization is gone: the last wake-up). Decided here from the events, whatever
+    the bridge's gate settings are."""
+    if st.get("fallen") is not None:
+        return "fall"
     persona = os.path.join(d, "persona.md")
     if not os.path.exists(persona) or not open(persona).read().strip():
         return "founding"
@@ -535,6 +544,9 @@ CLOSINGS = {
                 "you value; how you treat strangers and rivals; how you bargain; when you keep your word and when you "
                 "break it; how you mean to win. Then `ambitions.md` (2-3 goals with turns) and `plan.md`. Then play the "
                 "turn: found your capital, set research and builds, `civ ready`.",
+    "fall": "Your civilization has fallen: no cities and no units are left, and this is your last wake-up. There are "
+            "no orders to give and no `civ ready` to say. Close your story: the last lines of `chronicle.md` (how it "
+            "ended, and why, as you see it), and if you want, last words to the other leaders (`civ say`).",
 }
 
 
@@ -886,7 +898,7 @@ def handle(cfg, d, st, events, chat, reasons):
     # only for the turn this wake-up was for: if the agent said ready and the game moved on, the next turn is not ours to end
     same_turn = re.search(r"^turn:\s+%s\s*$" % start_turn, gate, re.M) is not None
     if (any(r.startswith(("turn ", "player_waiting")) for r in reasons) or "claude_wake" in " ".join(reasons)) \
-            and "ready:           no" in gate and not error and same_turn:
+            and "ready:           no" in gate and not error and same_turn and kind != "fall":
         civ("ready")
         forced = True
     st["wakes"] = st.get("wakes", 0) + 1
@@ -1035,8 +1047,11 @@ def main():
     gid, d = game_dir()
     st = load_state(d)
     print("CIVAI loop on game %s (agent: %s)" % (gid, cfg["agent"][0]), flush=True)
+    if st.get("fall_done") and not dry:
+        print("this civilization fell on turn %s and has had its last wake-up: nothing to do" % st["fallen"], flush=True)
+        return
     failures = 0
-    last_gate = 0
+    last_gate = last_alive = 0
     while True:
         events, epos = read_from(EVENTS, st["events_pos"])
         reasons = reasons_of(events)
@@ -1047,6 +1062,14 @@ def main():
             g = raw("gate")
             if g and not g.get("ready", True) and st.get("turn_woken") != g.get("turn"):
                 reasons = reasons + ["turn %s: turn (the turn waits for you)" % g.get("turn")]
+            look = st.get("fallen") is not None or time.time() - last_alive > 60   # a full status, once a minute
+            last_alive = time.time() if look else last_alive
+            if look and fallen():
+                if st.get("fallen") is None:
+                    st["fallen"] = game_turn()
+                    print(time.strftime("%H:%M:%S"), "the civilization has fallen on turn %s: one last wake-up" % st["fallen"],
+                          flush=True)
+                reasons = reasons + ["fall: your civilization has no cities and no units left"]
         if not reasons and not (once or dry):
             time.sleep(1)
             continue
@@ -1056,7 +1079,8 @@ def main():
             again = reasons_of(events)
             reasons = (again + [r for r in reasons if "waits for you" in r and r not in again]) if again else reasons
         if reasons and not any(r.startswith(("turn ", "player_waiting")) for r in reasons) and \
-                (st.get("audiences") or {}).get(str(game_turn()), 0) >= AUDIENCE_PER_TURN and not (once or dry):
+                (st.get("audiences") or {}).get(str(game_turn()), 0) >= AUDIENCE_PER_TURN and st.get("fallen") is None \
+                and not (once or dry):
             # enough audiences this turn: these messages wait for the next turn's wake-up (they stay unread till then)
             time.sleep(5)
             continue
@@ -1076,6 +1100,12 @@ def main():
             import traceback
             error = "loop error: " + traceback.format_exc().strip().splitlines()[-1]
             print(time.strftime("%H:%M:%S"), traceback.format_exc(), flush=True)
+        if st.get("fallen") is not None and (not error or failures >= 2):
+            # the last wake-up is done (or could not be had): the seat's loop ends; nothing in the game waits on it
+            st["events_pos"], st["chat_pos"], st["fall_done"] = epos, cpos, True
+            save_state(d, st)
+            print(time.strftime("%H:%M:%S"), "the civilization has fallen: the seat's loop ends", flush=True)
+            return
         if error and not once:
             # the agent never got to play (usage limit, network, crash): keep these events for the next try,
             # say so on screen, and wait longer each time (or until a usage limit says it resets). A seat's

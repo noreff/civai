@@ -51,6 +51,7 @@ The brief's header says which kind of wake-up this is:
 - **Council** (every few turns, and when something big happens: a first contact, a war, peace, a city lost or taken): step back before you act. Am I winning, and by which road? Who is my greatest threat and my best partner now, and what changed? What do I want from someone that I could ask for, offer or threaten today, and will I? What must have happened by the next council? Then revise `plan.md`, `ambitions.md` and the dossiers that changed.
 - **Audience:** someone wrote to you or asks for something. Decide what they really want, what it is worth to you and what it tells you about them; answer as yourself, refuse, or ignore on purpose, and write the exchange into their dossier.
 - **Founding:** your first wake-up. Take the throne: write `persona.md`, `ambitions.md` and `plan.md`, then play the turn.
+- **Fall:** your civilization has no cities and no units left. The last wake-up: close your chronicle, and say last words if you want.
 
 The game always waits for you: the turn doesn't end until you say `civ ready` (an audience doesn't need it). Every civilization plays the same turn at the same time, so an order runs when you give it.
 
