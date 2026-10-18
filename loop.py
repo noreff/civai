@@ -95,6 +95,12 @@ def fmt_event(e):
     return "T%s %s %s" % (e.get("turn"), e.get("kind"), rest)
 
 
+def game_turn():
+    # the turn the game is on now (after loading an older save, files can hold later turns)
+    m = re.search(r"Turn (\d+),", civ("ping"))
+    return int(m.group(1)) if m else 10 ** 6
+
+
 def brief(events, chat, reasons):
     parts = ["# Wake-up: " + "; ".join(reasons), "",
              "## Since your last wake-up", ""]
@@ -103,10 +109,12 @@ def brief(events, chat, reasons):
     parts += ["", "## Chat (the last %d lines; NEW = written to you since your last wake-up)" % CHAT_LINES, ""]
     new_ids = set(json.dumps(c, sort_keys=True) for c in chat)
     recent, _ = read_from(CHAT, 0)
+    now = game_turn()
+    recent = [c for c in recent if not isinstance(c.get("turn"), int) or c["turn"] <= now]
     parts += ["%sT%s %s: %s" % ("NEW " if json.dumps(c, sort_keys=True) in new_ids and c.get("from") != "claude" else "    ", c.get("turn"),
               "you" if c.get("from") == "claude" else human_name(), c.get("text")) for c in recent[-CHAT_LINES:]] or ["(none)"]
     parts += ["", "## Your last wake-ups (what you did)", ""]
-    parts += recent_wakes(3) or ["(none)"]
+    parts += recent_wakes(3, now) or ["(none)"]
     status = civ("status")
     parts += ambitions_note(status)
     parts += ["", "## State now", "", status, "", civ("research"), "", civ("proposals"), "", civ("offers"), "",
@@ -141,10 +149,11 @@ def my_land_map():
         return "(map unavailable: %s)" % e
 
 
-def recent_wakes(n):
-    # short-term memory: the final words of the last few wake-ups
+def recent_wakes(n, now=10 ** 6):
+    # short-term memory: the final words of the last few wake-ups (none from turns after `now`)
     _, d = game_dir()
     names = sorted(os.listdir(os.path.join(d, "wakes")), key=lambda x: os.path.getmtime(os.path.join(d, "wakes", x)))
+    names = [x for x in names if not re.match(r"T(\d+)-", x) or int(re.match(r"T(\d+)-", x).group(1)) <= now]
     out = []
     for name in names[-n:]:
         text = open(os.path.join(d, "wakes", name)).read()
