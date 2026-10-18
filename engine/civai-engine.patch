@@ -60709,10 +60709,10 @@ index 2849981..2fe0740 100644
 +		;
 +}
 diff --git a/CyPlayer.cpp b/CyPlayer.cpp
-index 909d09e..6c3f33a 100644
+index 909d09e..7b9ce41 100644
 --- a/CyPlayer.cpp
 +++ b/CyPlayer.cpp
-@@ -1,2229 +1,2375 @@
+@@ -1,2229 +1,2386 @@
 -//
 -// Python wrapper class for CvPlayer 
 -//
@@ -62960,6 +62960,7 @@ index 909d09e..6c3f33a 100644
 +#include "CySelectionGroup.h"
 +#include "CvDLLPythonIFaceBase.h"
 +#include "CvGlobals.h"
++#include "CvInitCore.h"
 +
 +CyPlayer::CyPlayer() : m_pPlayer(NULL)
 +{
@@ -63167,6 +63168,16 @@ index 909d09e..6c3f33a 100644
 +bool CyPlayer::isClaudeReady()
 +{
 +	return m_pPlayer ? m_pPlayer->isClaudeReady() : true;
++}
++
++void CyPlayer::claudeSetName(std::wstring szName)
++{
++	// CIVAI: the player's name on the screen and in the game's own texts (the leader's own name stays in the
++	// leaderhead info); kept in the save with the rest of the game's setup
++	if (m_pPlayer)
++	{
++		GC.getInitCore().setLeaderName(m_pPlayer->getID(), CvWString(szName));
++	}
 +}
 +
 +bool CyPlayer::claudeLaunch(int /*VictoryTypes*/ eVictory)
@@ -65318,10 +65329,10 @@ index 909d09e..6c3f33a 100644
 +		m_pPlayer->forcePeace((PlayerTypes)iPlayer);
 +}
 diff --git a/CyPlayer.h b/CyPlayer.h
-index 64b12a7..d3b3452 100644
+index 64b12a7..da4bd8f 100644
 --- a/CyPlayer.h
 +++ b/CyPlayer.h
-@@ -1,506 +1,515 @@
+@@ -1,506 +1,516 @@
 -#pragma once
 -
 -#ifndef CyPlayer_h
@@ -65876,7 +65887,8 @@ index 64b12a7..d3b3452 100644
 +	void handleDiploEvent(int /*DiploEventTypes*/ eDiploEvent, int /*PlayerTypes*/ ePlayer, int iData1, int iData2);
 +	void setClaude(bool bNewValue);
 +	bool isClaudeReady();
-+	bool claudeLaunch(int /*VictoryTypes*/ eVictory);	// CIVAI: the agent presses Launch on the Spaceship screen
++	bool claudeLaunch(int /*VictoryTypes*/ eVictory);
++	void claudeSetName(std::wstring szName);	// CIVAI: the name the screen shows for this player (e.g. its model)	// CIVAI: the agent presses Launch on the Spaceship screen
 +	void setClaudeReady(bool bNewValue);
 +	bool claudeApplyEvent(int /*EventTypes*/ eEvent, int iTriggeredId);
 +	bool isBarbarian();
@@ -66344,10 +66356,10 @@ index 64b12a7..d3b3452 100644
 +
 +#endif	// CyPlayer_h
 diff --git a/CyPlayerInterface1.cpp b/CyPlayerInterface1.cpp
-index 491771e..1189a2f 100644
+index 491771e..375066c 100644
 --- a/CyPlayerInterface1.cpp
 +++ b/CyPlayerInterface1.cpp
-@@ -1,444 +1,453 @@
+@@ -1,444 +1,454 @@
 -#include "CvGameCoreDLL.h"
 -#include "CyPlayer.h"
 -#include "CyUnit.h"
@@ -66838,6 +66850,7 @@ index 491771e..1189a2f 100644
 +		.def("handleDiploEvent", &CyPlayer::handleDiploEvent, "void (int eDiploEvent, int ePlayer, int iData1, int iData2) - CIVAI: answer this AI's request for ePlayer, as on the diplomacy screen")
 +		.def("claudeApplyEvent", &CyPlayer::claudeApplyEvent, "bool (int eEvent, int iTriggeredId) - CIVAI: Claude's choice in a random event")
 +		.def("setClaude", &CyPlayer::setClaude, "void (bool) - CIVAI: hand this civ to Claude (not saved; set after every load)")
++		.def("claudeSetName", &CyPlayer::claudeSetName, "void (wstring name) - CIVAI: the name the screen shows for this player")
 +		.def("claudeLaunch", &CyPlayer::claudeLaunch, "bool (int eVictory) - CIVAI: launch the spaceship (the human's Launch button)")
 +		.def("isClaudeReady", &CyPlayer::isClaudeReady, "bool () - CIVAI: false while the turn is held for this civ's agent")
 +		.def("setClaudeReady", &CyPlayer::setClaudeReady, "void (bool) - CIVAI: false holds this civ's turn until its agent is done")
