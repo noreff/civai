@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 126
+BRIDGE_VERSION = 127
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -224,7 +224,7 @@ def collectPlayers(iMe):
 			"color": playerColor(p),
 		}
 		if met:
-			d["name"] = p.getName()
+			d["name"] = realName(i)
 			d["civ"] = p.getCivilizationShortDescription(0)
 			d["leader"] = infoType(gc.getLeaderHeadInfo, p.getLeaderType())
 			d["human"] = p.isHuman()
@@ -868,9 +868,9 @@ def cmdPlayer(args):
 		if not p.isAlive():
 			continue
 		w = unicode(want).lower()
-		if want is not None and (str(i) == str(want) or p.getName().lower() == w
+		if want is not None and (str(i) == str(want) or realName(i).lower() == w
 				or p.getCivilizationShortDescription(0).lower() == w
-				or (len(w) >= 3 and (p.getName().lower().startswith(w)
+				or (len(w) >= 3 and (realName(i).lower().startswith(w)
 					or p.getCivilizationShortDescription(0).lower().startswith(w)))):
 			target = i
 			break
@@ -909,13 +909,24 @@ def cmdPlayer(args):
 
 EVENTS_FILE = OUT_DIR + "\\events.jsonl"
 
+def realName(i):
+	# the leader's own name: what every seat reads. The screen may show another name for the player (its model,
+	# set with claudeSetName for the video), which the seats must not learn
+	p = gc.getPlayer(i)
+	if p.isHuman() or p.getLeaderType() < 0:
+		return p.getName()
+	return gc.getLeaderHeadInfo(p.getLeaderType()).getDescription()
+
+def teamName(t):
+	return realName(gc.getTeam(t).getLeaderID())
+
 def pname(i):
 	iMe, iTeam = myIds()
 	if i < 0:
 		return "nobody"
 	p = gc.getPlayer(i)
 	if i == iMe or gc.getTeam(iTeam).isHasMet(p.getTeam()):
-		return p.getName() + " (" + p.getCivilizationShortDescription(0) + ")"
+		return realName(i) + " (" + p.getCivilizationShortDescription(0) + ")"
 	return "an unknown civilization"
 
 def readEventTail(kind, names):
@@ -1001,7 +1012,7 @@ def recordEvent(tag, a):
 		if other == iTeam:
 			other = a[0]
 		# the game reports a contact before it marks the teams as met, so name them directly (they've just met)
-		names = ["%s (%s)" % (gc.getPlayer(i).getName(), gc.getPlayer(i).getCivilizationShortDescription(0))
+		names = ["%s (%s)" % (realName(i), gc.getPlayer(i).getCivilizationShortDescription(0))
 			for i in range(gc.getMAX_CIV_PLAYERS()) if gc.getPlayer(i).isAlive() and gc.getPlayer(i).getTeam() == other]
 		if names and readEventTail("first_contact", names):
 			return   # reported twice (each side meets the other)
@@ -1060,7 +1071,7 @@ def recordEvent(tag, a):
 			kind = "peace_made"
 			if war:
 				kind = "war_declared"
-			writeEvent(kind, {"team": gc.getTeam(t1).getName(), "against": gc.getTeam(t2).getName()})
+			writeEvent(kind, {"team": teamName(t1), "against": teamName(t2)})
 	elif tag == "claudeDiplomacy":
 		frm, to, comment, data, gives, wants = engineArgs(a)
 		if to == iMe:
@@ -1135,7 +1146,7 @@ def writeTruth(turn):
 			if u.canAttack():
 				mil = mil + 1
 			(u, it) = p.nextUnit(it, False)
-		rows.append({"id": i, "name": p.getName(), "civ": p.getCivilizationShortDescription(0), "alive": p.isAlive(),
+		rows.append({"id": i, "name": realName(i), "civ": p.getCivilizationShortDescription(0), "alive": p.isAlive(),
 			"agent": isAgent(i), "human": p.isHuman(), "score": gc.getGame().getPlayerScore(i), "cities": p.getNumCities(),
 			"pop": p.getTotalPopulation(), "units": units, "military": mil, "gold": p.getGold(),
 			"techs": len([k for k in range(gc.getNumTechInfos()) if t.isHasTech(k)]), "era": gc.getEraInfo(p.getCurrentEra()).getType(),
@@ -1544,7 +1555,8 @@ def deliverChat(frm, text, to):
 	Each seat's chat holds only what that seat may read; chat_all.jsonl (the director's and the video's)
 	holds everything."""
 	turn = gc.getGame().getGameTurn()
-	full = lambda i: "%s (%s)" % (gc.getPlayer(i).getName(), gc.getPlayer(i).getCivilizationShortDescription(0))
+	full = lambda i: "%s (%s)" % (realName(i), gc.getPlayer(i).getCivilizationShortDescription(0))
+	shown = lambda i: gc.getPlayer(i).getName() != realName(i) and u"%s (%s)" % (gc.getPlayer(i).getName(), full(i)) or full(i)
 	appendLine(OUT_DIR + "\\chat_all.jsonl", {"from": full(frm), "from_id": frm,
 		"to": to is None and "all" or full(to), "to_id": to, "text": text, "turn": turn, "time": time.strftime("%H:%M:%S")})
 	# like the game's own diplomacy: only leaders who have met the speaker hear him
@@ -1564,12 +1576,12 @@ def deliverChat(frm, text, to):
 			actAs(prev)
 	# the screen (a human player, or the spectator whose screen is filmed) shows every line: the video sees all
 	# channels. The speaker in his civ's colour; a private line says to whom and that it is private
-	head = to is None and u"%s to all" % colored(frm, full(frm)) or \
-		u"%s \u2192 %s  <color=170,170,170,255>(private)</color>" % (colored(frm, full(frm)), colored(to, full(to)))
+	head = to is None and u"%s to all" % colored(frm, shown(frm)) or \
+		u"%s \u2192 %s  <color=170,170,170,255>(private)</color>" % (colored(frm, shown(frm)), colored(to, shown(to)))
 	screens = humanPlayers()
 	if spectating() and gc.getGame().getActivePlayer() not in screens:
 		screens.append(gc.getGame().getActivePlayer())
-	line = u"<font=3>%s:  <color=255,235,180,255>%s</color></font>" % (head, text)   # the message panel wraps it
+	line = u"<font=4>%s:  <color=255,235,180,255>%s</color></font>" % (head, text)   # the message panel wraps it
 	for i in screens:
 		CyInterface().addMessage(i, True, gc.getEVENT_MESSAGE_TIME() * 4, line, "",
 			InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
@@ -2987,7 +2999,7 @@ def findPlayer(want):
 	w = unicode(want).lower()
 	for i in range(gc.getMAX_CIV_PLAYERS()):
 		p = gc.getPlayer(i)
-		if p.isAlive() and (str(i) == w or p.getName().lower().startswith(w)
+		if p.isAlive() and (str(i) == w or realName(i).lower().startswith(w)
 				or p.getCivilizationShortDescription(0).lower().startswith(w)):
 			return i
 	raise Exception("no player called %s" % want)
@@ -3177,7 +3189,7 @@ def makePeaceTradeVal(peace, taker):
 
 def warDeclaredBy(a, b):
 	# which side declared the current war between teams a and b (from our own event log)
-	names = (gc.getTeam(a).getName(), gc.getTeam(b).getName())
+	names = (teamName(a), teamName(b))
 	found = []   # (turn, declaring team) in log order; a reload drops the declarations of its abandoned turns
 	try:
 		for line in open(EVENTS_FILE):
@@ -3511,9 +3523,9 @@ def proposalText(v):
 		fav = gc.getLeaderHeadInfo(gc.getPlayer(v["from"]).getPersonalityType()).getFavoriteCivic()
 		return "%s asks you to switch to %s" % (who, fav >= 0 and gc.getCivicInfo(fav).getDescription() or "their civic")
 	if c == "join_war":
-		return "%s asks you to join their war on %s" % (who, gc.getTeam(v["data"]).getName())
+		return "%s asks you to join their war on %s" % (who, teamName(v["data"]))
 	if c == "stop_trading":
-		return "%s asks you to stop trading with %s" % (who, gc.getTeam(v["data"]).getName())
+		return "%s asks you to stop trading with %s" % (who, teamName(v["data"]))
 	if c == "cancel_deal":
 		return "%s cancels a deal with you: %s / %s" % (who, gives, wants)
 	return "%s says something (%s)" % (who, c)
@@ -3839,7 +3851,7 @@ def cmdWar(args):
 		(u, it) = gc.getPlayer(iMe).nextUnit(it, False)
 	deals = [dealLine(d, o, give, get) for (d, o, give, get) in ourDeals() if gc.getPlayer(o).getTeam() == other]
 	if args.get("check"):
-		return {"check": True, "can_declare": can, "against": gc.getTeam(other).getName(),
+		return {"check": True, "can_declare": can, "against": teamName(other),
 			"our_units_pushed_out": ours, "deals_that_end": deals}
 	if not can:
 		raise Exception("we can't declare war on %s now (peace treaty still running, or not met?)" % args["player"])
@@ -3852,7 +3864,7 @@ def cmdWar(args):
 		elif (u.getX(), u.getY()) != (x, y):
 			moved.append("%s #%d pushed out of their land: (%d,%d) -> (%d,%d)" % (name, uid, x, y, u.getX(), u.getY()))
 	refreshSnapshot()
-	return {"war_declared_on": gc.getTeam(other).getName(), "deals_ended": deals, "units_pushed_out": moved}
+	return {"war_declared_on": teamName(other), "deals_ended": deals, "units_pushed_out": moved}
 
 
 def cmdRelations(args):
@@ -3907,9 +3919,9 @@ def cmdVictory(args):
 	r = {"turn": "%d of %d" % (g.getGameTurn(), g.getMaxTurns() or g.getEstimateEndTurn()),
 		"scores": ", ".join(["%s %d" % (n, sc) for sc, n in scores])}
 	if g.getWinner() >= 0:
-		r["winner"] = gc.getTeam(g.getWinner()).getName()
+		r["winner"] = teamName(g.getWinner())
 		r["won_by"] = g.getVictory() >= 0 and gc.getVictoryInfo(g.getVictory()).getDescription() or "-"
-	ships = ["%s arrives in %d turns" % (gc.getTeam(t).getName(), gc.getTeam(t).getVictoryCountdown(v))
+	ships = ["%s arrives in %d turns" % (teamName(t), gc.getTeam(t).getVictoryCountdown(v))
 		for t in range(gc.getMAX_CIV_TEAMS()) for v in range(gc.getNumVictoryInfos())
 		if gc.getTeam(t).isAlive() and gc.getTeam(t).getVictoryCountdown(v) > 0]
 	if ships:
@@ -3990,7 +4002,7 @@ def cmdTradeable(args):
 						continue
 				except:
 					continue
-				txt = "%s:%s" % (k, gc.getPlayer(c).getName())
+				txt = "%s:%s" % (k, realName(c))
 				if a != iMe and not pa.isHuman() and not isAgent(a):   # our side and an agent's are their own decision
 					den = pa.getTradeDenial(b, tradeData((k, c)))
 					if den != DenialTypes.NO_DENIAL:
@@ -4423,7 +4435,7 @@ def cmdSpaceship(args):
 		for t in range(gc.getMAX_CIV_TEAMS()):
 			c = gc.getTeam(t).getVictoryCountdown(v)
 			if gc.getTeam(t).isAlive() and c > 0:
-				flying.append("%s: arrives in %d turns" % (t == iTeam and "ours" or gc.getTeam(t).getName(), c))
+				flying.append("%s: arrives in %d turns" % (t == iTeam and "ours" or teamName(t), c))
 		r = {"parts": rows, "can_launch": team.canLaunch(v) and "yes" or "no",
 			"success_chance": "%d%%" % team.getLaunchSuccessRate(v),
 			"flight_turns": team.getVictoryDelay(v),
@@ -4759,7 +4771,7 @@ def announceShips(arg=None):
 			key = "%d:%d" % (t, v)
 			if gc.getTeam(t).isAlive() and c > 0 and key not in heard:
 				heard.append(key)
-				writeEvent("spaceship_launched", {"by": t == p.getTeam() and "us" or gc.getTeam(t).getName(),
+				writeEvent("spaceship_launched", {"by": t == p.getTeam() and "us" or teamName(t),
 					"arrives_in_turns": c, "note": "the game is won when it arrives; taking its owner's capital destroys it"})
 	g["ships_heard"] = heard
 	writeGate(g)

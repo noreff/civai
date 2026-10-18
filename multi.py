@@ -15,6 +15,7 @@ games/<id>/seats.json:
 Every seat gets the same playbook, tools, memory layout and wake-up brief; only the model and its harness differ.
 """
 import json
+import re
 import os
 import signal
 import subprocess
@@ -82,9 +83,31 @@ def manifest(game):
     print("manifest: %d entries" % len(history))
 
 
+def screen_names(game):
+    """The names the screen shows (seats.json: "display" per seat, "spectator_name"): the video sees which model
+    plays whom. The seats keep reading the leaders' own names (the bridge's realName; broker.neutral maps any
+    screen name back), so no model learns who its rivals are. Kept in games/<id>/names.json."""
+    conf = json.load(open(os.path.join(HERE, "games", game, "seats.json")))
+    names = {s["player"]: s["display"] for s in conf["seats"] if s.get("display")}
+    if conf.get("spectator_name"):
+        names[conf.get("spectator", 0)] = conf["spectator_name"]
+    if not names:
+        return
+    code = "\n".join(["p = gc.getPlayer(%d)\nif hasattr(p, 'claudeSetName'): p.claudeSetName(%r)" % (i, n)
+                      for i, n in names.items()]) + \
+        "\nimport ClaudeBridge as B\nresult = dict([(i, (gc.getPlayer(i).getName(), B.realName(i))) for i in %r])" % list(names)
+    out = subprocess.run([os.path.join(HERE, "civ"), "py", code], capture_output=True, text=True,
+                         env=dict(os.environ, CIV_DEV="1"), timeout=60).stdout
+    pairs = dict((int(i), (a, b)) for i, a, b in re.findall(r"(\d+): \(u?'([^']*)', u?'([^']*)'\)", out))
+    mapping = {a: b for i, (a, b) in pairs.items() if a != b and i != conf.get("spectator", 0)}
+    json.dump(mapping, open(os.path.join(HERE, "games", game, "names.json"), "w"), indent=1)
+    print("screen names:", ", ".join("%s = %s" % (a, b) for i, (a, b) in sorted(pairs.items())) or out.strip())
+
+
 def start(game):
     config(game)
     manifest(game)
+    screen_names(game)
     if not alive(pidfile(game, "broker")):
         spawn(game, "broker", [sys.executable, os.path.join(HERE, "broker.py"), game],
               os.path.join(HERE, "games", game, "broker.log"))

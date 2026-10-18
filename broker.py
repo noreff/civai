@@ -67,8 +67,20 @@ NEUTRAL = (("claude_wake", "turn_wake"), ("claude_ready", "turn_ready"), ("claud
            ("ClaudeBridge", "Bridge"))
 
 
+def screen_names():
+    # the players' screen names (their models, for the video) -> the leaders' own names, which is all a seat may
+    # read (multi.py screen_names writes games/<id>/names.json)
+    try:
+        game = open(os.path.join(HERE, "games", "CURRENT")).read().strip()
+        return json.load(open(os.path.join(HERE, "games", game, "names.json"))).items()
+    except (OSError, ValueError):
+        return []
+
+
 def neutral(text):
     for a, b in NEUTRAL:
+        text = text.replace(a, b)
+    for a, b in screen_names():
         text = text.replace(a, b)
     return text
 
