@@ -648,8 +648,8 @@ def memory_added(d, base="HEAD", head=None):
     try:
         diff = subprocess.run(["git", "diff", "--no-color", "-U0", base] + ([head] if head else []) + ["--"] + files,
                               cwd=d, capture_output=True, text=True).stdout
-        new = [] if head else subprocess.run(["git", "ls-files", "--others", "--exclude-standard", "--", "dossiers"],
-                                             cwd=d, capture_output=True, text=True).stdout.split()
+        new = [] if head else [f for f in subprocess.run(["git", "ls-files", "-z", "--others", "--exclude-standard", "--",
+                                                          "dossiers"], cwd=d, capture_output=True, text=True).stdout.split("\0") if f]
     except OSError:
         return []
     out, name = [], ""
@@ -892,7 +892,13 @@ def main():
             else:
                 print(prompt_for(d, events, chat, reasons or ["(dry run)"]))
             return
-        error = handle(cfg, d, st, events, chat, reasons or ["manual run"])
+        try:
+            error = handle(cfg, d, st, events, chat, reasons or ["manual run"])
+        except Exception:
+            # a bug in the loop must not stop the game (it waits for this seat): log it and try again
+            import traceback
+            error = "loop error: " + traceback.format_exc().strip().splitlines()[-1]
+            print(time.strftime("%H:%M:%S"), traceback.format_exc(), flush=True)
         if error and not once:
             # the agent never got to play (usage limit, network, crash): keep these events for the next try,
             # say so on screen once, and wait longer each time; the turn itself was already released
