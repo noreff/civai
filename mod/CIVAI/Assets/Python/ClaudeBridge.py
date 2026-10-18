@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 122
+BRIDGE_VERSION = 123
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -4732,17 +4732,10 @@ def seatsOnLoad():
 	except:
 		log("seats on load FAILED:\n%s" % "".join(traceback.format_exception(*sys.exc_info())))
 
-def seatTurnStart(turn):
-	# a game of several agents: every agent plays every turn; the engine holds its civ's turn until it is ready
-	iMe = getClaudePlayer()
-	p = gc.getPlayer(iMe)
-	if not p.isAlive():
-		return
-	if hasattr(p, "setClaudeReady"):
-		p.setClaudeReady(False)
+def announceShips(arg=None):
+	# a spaceship launch is announced to every leader by the game: this seat hears of each launch once
+	p = gc.getPlayer(getClaudePlayer())
 	g = readGate()
-	reasons = list(g.get("attention") or []) + ["turn"]
-	# a spaceship launch is announced to every leader by the game: each seat hears of each launch once
 	heard = g.get("ships_heard") or []
 	for t in range(gc.getMAX_CIV_TEAMS()):
 		for v in range(gc.getNumVictoryInfos()):
@@ -4753,6 +4746,19 @@ def seatTurnStart(turn):
 				writeEvent("spaceship_launched", {"by": t == p.getTeam() and "us" or gc.getTeam(t).getName(),
 					"arrives_in_turns": c, "note": "the game is won when it arrives; taking its owner's capital destroys it"})
 	g["ships_heard"] = heard
+	writeGate(g)
+
+def seatTurnStart(turn):
+	# a game of several agents: every agent plays every turn; the engine holds its civ's turn until it is ready
+	iMe = getClaudePlayer()
+	p = gc.getPlayer(iMe)
+	if not p.isAlive():
+		return
+	if hasattr(p, "setClaudeReady"):
+		p.setClaudeReady(False)
+	announceShips()
+	g = readGate()
+	reasons = list(g.get("attention") or []) + ["turn"]
 	g["on"] = True
 	g["ready_turn"] = -1
 	writeGate(g)
