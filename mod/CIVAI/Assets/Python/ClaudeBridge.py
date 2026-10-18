@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 49
+BRIDGE_VERSION = 50
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1814,7 +1814,9 @@ def cmdBudget(args):
 	p = gc.getPlayer(getClaudePlayer())
 	if not args.get("set"):
 		r = budgetInfo(p)
-		if (loadChoices() or {}).get("budget"):
+		if engineControl():
+			r["chosen_by"] = "you (it stays until you change it)"
+		elif (loadChoices() or {}).get("budget"):
 			r["chosen_by"] = "you (kept every turn)"
 		else:
 			r["chosen_by"] = "the built-in AI (until you set it)"
@@ -3458,8 +3460,10 @@ def autoReadyOrWake(turn):
 		return
 	reasons = list(g.get("attention") or [])
 	enemies = enemiesNear()
-	if enemies:
+	if enemies and sorted(enemies) != sorted(g.get("last_enemies") or []):
+		# only when something changed: the same stack standing still is no news
 		reasons.append("enemy_near: " + "; ".join(enemies[:5]))
+	g["last_enemies"] = enemies
 	me = gc.getPlayer(myIds()[0])
 	if me.getCurrentResearch() < 0 and me.getNumCities() > 0:
 		reasons.append("research_idle")
@@ -3467,6 +3471,7 @@ def autoReadyOrWake(turn):
 	if every > 0 and turn % every == 0:
 		reasons.append("review")
 	if reasons:
+		writeGate(g)
 		writeEvent("claude_wake", {"turn": turn, "reasons": reasons})
 	else:
 		g["ready_turn"] = turn

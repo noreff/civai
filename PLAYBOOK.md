@@ -63,7 +63,7 @@ Rules of thumb:
 - **Act, don't only talk.** Back words with moves: research, builds, units, war and peace.
 - **Religion and civics are yours.** Adopt a state religion with `civ religion <name>` and switch civics with `civ civics <civic>...`, paying the normal anarchy.
 - **Ongoing deals are yours to end.** `civ deals` lists open borders, pacts and resource trades with their age; `civ cancel <deal#|player>` ends one, like the game's own cancel (allowed 10 turns after signing; the other leader remembers it).
-- **The budget is yours.** `civ budget research 70 gold 30` sets the gold/research/culture/espionage split and it stays every turn (`civ budget auto` hands it back to the built-in AI). If your split would empty the treasury, the AI's split is used that turn (event `budget_suspended`).
+- **The budget is yours.** `civ budget research 70 gold 30` sets the gold/research/culture/espionage split; it stays until you change it. If the treasury would run dry, you get `treasury_empty`: research stalls and unpaid units desert (the game's rule).
 - **Conquered cities are yours.** A city your units take is kept (size-1 cities burn by the game's rule). To burn it instead: `civ raze <city>`, on that turn or the next.
 - **Deals are yours.** Nobody makes deals, demands or wars for your civilization. Agree in chat, then make it real: `civ offer <player> --give ... --get ...` (an AI answers at once by its own judgment; the human answers on screen with !accept / !decline), `civ give` for gifts and kept promises, `civ war` to declare war. Other leaders' proposals and demands come to you (`proposal`). The game's rules decide what's tradeable (`civ tradeable`). A promise in chat is only kept when the deal is actually done.
 

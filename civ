@@ -52,7 +52,7 @@
   civ cancel <deal#|player>  end an ongoing deal, like the diplomacy screen's "cancel" (the other side remembers)
   civ budget [research N gold N culture N espionage N | auto]
                            the commerce split: show it, or set it (steps of 10, sum 100; gold takes
-                           what's left); kept every turn until `civ budget auto` hands it back to the AI
+                           what's left); it stays until you change it
   civ raze <city>          burn a city we just captured (this turn or last); otherwise captured cities are kept
   civ around X Y           one place and its 8 neighbours: ground (HILL/flat, forest, river, road),
                            owner, city, resource, units; every line with its coordinates
