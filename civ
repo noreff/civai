@@ -295,8 +295,11 @@ def unit_flags(u, me, players, with_land=True):
     if u["waiting"]:
         flags.append("waiting")
     if u.get("claimed"):
-        flags.append("CLAUDE" + (" -> %d,%d" % tuple(u["target"]) if u.get("target") else ", waiting for orders"))
-    if u["missions_queued"]:
+        flags.append("CLAUDE" + (" -> %d,%d" % tuple(u["target"]) if u.get("target") else
+                                 "" if u.get("job") or u["missions_queued"] or u["fortified"] else ", waiting for orders"))
+    if u.get("job"):
+        flags.append("job " + u["job"])
+    elif u["missions_queued"]:
         flags.append("%d orders queued" % u["missions_queued"])
     if u["damage"]:
         flags.append("damaged %d%%" % u["damage"])

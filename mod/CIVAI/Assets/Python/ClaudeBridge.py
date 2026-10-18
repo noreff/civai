@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 131
+BRIDGE_VERSION = 132
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -556,6 +556,7 @@ def collectMyUnits(iMe):
 			"fortified": u.getFortifyTurns() > 0,
 			"waiting": u.isWaiting(),
 			"missions_queued": g.getLengthMissionQueue(),
+			"job": jobText(u),
 			"claimed": claims.has_key(u.getID()),
 			"target": claims.get(u.getID(), {}).get("target"),
 		})
@@ -2040,12 +2041,26 @@ def spyMissions(u):
 			out.append((label and "%s %s" % (name, label) or name, i, data, cost, me.canDoEspionageMission(i, target, pl, data)))
 	return out, None
 
+def jobText(u):
+	# a worker's job in progress, as the game shows it on the unit: what, how far, how many more turns. A job
+	# goes on by itself every turn until it is done; ordering it again only restarts nothing (progress stays on the tile)
+	b = u.getBuildType()
+	if b < 0:
+		return None
+	pl = u.plot()
+	info = gc.getBuildInfo(b)
+	left = pl.getBuildTurnsLeft(b, 0, 0)
+	return "%s: %d of %d done, about %d more turn%s (it goes on by itself)" % (info.getType()[len("BUILD_"):],
+		pl.getBuildProgress(b), pl.getBuildTime(b), left, left != 1 and "s" or "")
+
 def cmdActions(args):
 	u = myUnit(args["id"])
 	acts = unitActions(u)
 	r = {"id": u.getID(), "unit": gc.getUnitInfo(u.getUnitType()).getDescription(), "at": (u.getX(), u.getY()),
 		"moves_left": u.movesLeft() / gc.getMOVE_DENOMINATOR(),
 		"actions": [n for (n, a, t) in acts if not t], "with_target_x_y": [n for (n, a, t) in acts if t]}
+	if jobText(u):
+		r["job"] = jobText(u)
 	if u.getDomainType() == DomainTypes.DOMAIN_AIR:
 		r["air"] = ("range %d tiles from its base. Strike enemy units: civ move %d X Y --attack (a tile within range; "
 			"`civ odds X Y %d` first); rebase: civ move %d X Y to a city or carrier of yours within range") % (
