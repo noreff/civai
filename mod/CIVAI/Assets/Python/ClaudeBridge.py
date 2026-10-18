@@ -16,7 +16,7 @@ import re
 
 gc = CyGlobalContext()
 
-BRIDGE_VERSION = 147
+BRIDGE_VERSION = 149
 OUT_DIR = "C:\\claude_bridge"
 CONFIG_FILE = OUT_DIR + "\\config.txt"
 
@@ -1198,7 +1198,8 @@ def cameraHold(x, y):
 
 SHOT_SECONDS = 9        # one shot of the cameraman
 EVENT_HOLD = 12         # an event's shot (a battle, a city taken) is held this long before the cameraman moves on
-SHOT_KINDS = ("army", "frontier", "city", "army", "frontier", "wide")
+SHOT_KINDS = ("army", "frontier", "tour", "city", "frontier", "army", "tour", "wide")
+TOUR_SECONDS = 20     # a tour: the whole world from far out, gliding from one capital to another
 
 def cameraman():
 	# the spectator's camera never rests: between events it cuts every few seconds to something worth seeing,
@@ -1222,6 +1223,16 @@ def cameraman():
 			g_camera["shot"] = k + i + 1
 			break
 	if not shot:
+		return
+	if shot[0] == "tour":
+		a, b, who = shot[1], shot[2], shot[3]
+		shotLabel(who)
+		cam = CyCamera()
+		cam.JustLookAtPlot(a)
+		cam.SetBasePitch(0.0)
+		cam.SetZoom(0.8)
+		glide(a, b, 0.8, 0.8, TOUR_SECONDS)
+		g_camera["until"] = now + TOUR_SECONDS
 		return
 	x, y, zoom, pitch, who = shot
 	shotLabel(who)
@@ -1285,7 +1296,7 @@ def pickShot(kind, random):
 		if best:
 			x, y = random.choice(best)
 			pl = m.plot(x, y)
-			return (x, y, 0.5, -12.0, [pl.getUnit(0).getOwner()])
+			return (x, y, 0.55, -12.0, [pl.getUnit(0).getOwner()])
 		return None
 	if kind == "frontier":
 		edges = []
@@ -1303,7 +1314,7 @@ def pickShot(kind, random):
 		if edges:
 			top = max([e[0] for e in edges])
 			w, x, y, b = random.choice([e for e in edges if e[0] == top])
-			return (x, y, 0.6, -8.0, [m.plot(x, y).getOwner(), b])
+			return (x, y, 0.62, -8.0, [m.plot(x, y).getOwner(), b])
 		return None
 	if kind == "city":
 		cities = []
@@ -1314,8 +1325,17 @@ def pickShot(kind, random):
 				(c, it) = gc.getPlayer(i).nextCity(it, False)
 		if cities:
 			c = random.choice(cities)
-			return (c.getX(), c.getY(), 0.45, -15.0, [c.getOwner()])
+			return (c.getX(), c.getY(), 0.5, -15.0, [c.getOwner()])
 		return None
+	if kind == "tour":
+		caps = [gc.getPlayer(i).getCapitalCity() for i in seats]
+		caps = [c for c in caps if c and not c.isNone()]
+		if len(caps) < 2:
+			return None
+		n = g_camera.get("tour", 0)
+		g_camera["tour"] = n + 1
+		a, b = caps[n % len(caps)], caps[(n + 1) % len(caps)]
+		return ("tour", a.plot(), b.plot(), [a.getOwner(), b.getOwner()])
 	if kind == "wide":
 		i = seats[g_camera.get("wide", 0) % len(seats)]
 		g_camera["wide"] = g_camera.get("wide", 0) + 1
@@ -1720,7 +1740,7 @@ def appendLine(path, row):
 	finally:
 		f.close()
 
-def deliverChat(frm, text, to):
+def deliverChat(frm, text, to, aim=None):
 	"""Several agents: a message from seat frm to everyone (to=None, public) or to one player (private).
 	Each seat's chat holds only what that seat may read; chat_all.jsonl (the director's and the video's)
 	holds everything."""
@@ -1753,7 +1773,7 @@ def deliverChat(frm, text, to):
 		CyInterface().addMessage(i, True, gc.getEVENT_MESSAGE_TIME() * 4, line, "",
 			InterfaceMessageTypes.MESSAGE_TYPE_MAJOR_EVENT, "", -1, -1, -1, False, False)
 	if spectating():
-		chatShow(head, text)
+		chatShow(head, text, aim)
 
 # The filmed screen's chat: the game's own message panel grows over the middle of the map and, under Wine,
 # keeps its lines for minutes (its clock moves in 128 s steps). So the spectator gets the bridge's own panel at
@@ -1762,9 +1782,12 @@ def deliverChat(frm, text, to):
 CHAT_LINES, CHAT_SECONDS, CHAT_CHARS = 3, 25, 220
 g_chat = {"lines": [], "shown": None}
 
-def chatShow(head, text):
+def chatShow(head, text, aim=None):
 	if len(text) > CHAT_CHARS:
 		text = text[:CHAT_CHARS].rsplit(" ", 1)[0] + u"\u2026"
+	if aim:
+		# what the speaker privately meant by it (its own note, sent with the message): said vs meant, for the viewer
+		text = text + u"\n<color=175,175,175,255>   meant: %s</color>" % aim[:140]
 	g_chat["lines"] = (g_chat["lines"] + [(camClock(), head, text)])[-CHAT_LINES:]
 
 CAPTION_SECONDS = 8
@@ -1841,7 +1864,7 @@ def chatPanel():
 	per = w / 13   # characters per line at the chat's font, about (a low guess: a scroll bar is worse than space)
 	rows = 0
 	for t, head, text in g_chat["lines"]:
-		rows = rows + 1 + (len(re.sub("<[^>]*>", "", head)) + len(text) + 3) / per
+		rows = rows + 1 + text.count("\n") + (len(re.sub("<[^>]*>", "", head)) + len(re.sub("<[^>]*>", "", text)) + 3) / per
 	h = min(int(H * 0.6), rows * 27 + 28)
 	x, y = 12, int(H * 0.86) - h
 	body = u"\n".join([u"<font=4>%s:  <color=255,235,180,255>%s</color></font>" % (head, text)
@@ -1939,7 +1962,7 @@ def cmdSay(args):
 				raise Exception("that is you")
 			if not gc.getTeam(gc.getPlayer(getClaudePlayer()).getTeam()).isHasMet(gc.getPlayer(to).getTeam()):
 				raise Exception("you have not met %s yet" % args["to"])
-		deliverChat(getClaudePlayer(), text, to)
+		deliverChat(getClaudePlayer(), text, to, args.get("aim"))   # the aim only ever reaches the filmed screen
 		me = gc.getPlayer(getClaudePlayer()).getTeam()
 		heard = [i for i in range(gc.getMAX_CIV_PLAYERS()) if i != getClaudePlayer() and gc.getPlayer(i).isAlive()
 			and gc.getTeam(gc.getPlayer(i).getTeam()).isHasMet(me) and (to is None or i == to)]

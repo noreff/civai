@@ -714,7 +714,8 @@ def main(argv):
                 # the aim and the message in one call: `civ say [--to X] --aim "what this message is for" "message"`
                 i = argv.index(flag[0])
                 tid = uuid.uuid4().hex[:10]
-                video_log("thoughts.jsonl", {"id": tid, "text": argv[i + 1]})
+                aim = argv[i + 1]
+                video_log("thoughts.jsonl", {"id": tid, "text": aim})
                 with open(os.path.join(VIDEO_LOG_DIR, ".last_thought"), "w") as f:
                     f.write(tid)
                 argv = argv[:i] + argv[i + 2:]
@@ -726,7 +727,7 @@ def main(argv):
             popup = len(argv) > 1 and argv[1] == "--popup"
             to = argv[2] if len(argv) > 2 and argv[1] == "--to" else None
             text = " ".join(argv[3 if to else 2 if popup else 1:])
-            r = call("say", {"text": text, "popup": popup, "to": to})
+            r = call("say", {"text": text, "popup": popup, "to": to, "aim": flag and aim or None})
             if r.get("read_by"):
                 print("read by: %s" % ", ".join(r["read_by"]))
             if r.get("note"):
