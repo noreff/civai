@@ -82,10 +82,10 @@ index c3563d7..0e9d9fc 100644
  				{
  					CvMessageControl::getInstance().sendChangeWar(GET_PLAYER(eVassal).getTeam(), true);
 diff --git a/CvGame.cpp b/CvGame.cpp
-index 63ade8d..7fb53ed 100644
+index 63ade8d..41cc832 100644
 --- a/CvGame.cpp
 +++ b/CvGame.cpp
-@@ -1,9040 +1,9088 @@
+@@ -1,9040 +1,9101 @@
 -// game.cpp
 -
 -#include "CvGameCoreDLL.h"
@@ -15661,6 +15661,19 @@ index 63ade8d..7fb53ed 100644
 +						}
 +					}
 +					continue;
++				}
++				if (player.isClaude() && !(player.isAutoMoves()))
++				{
++					// CIVAI: the agent said ready. Its standing orders still run first, as before: the built-in AI
++					// never takes them over (the bridge keeps it off units with orders), so if nobody ran them here
++					// a unit with a multi-turn order would stay "ready" and hold the turn
++					for(pLoopSelectionGroup = player.firstSelectionGroup(&iLoop); pLoopSelectionGroup; pLoopSelectionGroup = player.nextSelectionGroup(&iLoop))
++					{
++						if (pLoopSelectionGroup->getLengthMissionQueue() > 0)
++						{
++							pLoopSelectionGroup->autoMission();
++						}
++					}
 +				}
 +				if (!(player.isAutoMoves()))
 +				{
