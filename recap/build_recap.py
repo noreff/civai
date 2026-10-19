@@ -501,8 +501,10 @@ def seat_measures(g, sl, rec, calls, nturns):
         "cache_read_tokens": sum(x.get("cache_read_input_tokens", 0) for x in u),
         "cache_write_tokens": sum(x.get("cache_creation_input_tokens", 0) for x in u),
         "input_tokens": sum(x.get("input_tokens", 0) for x in u),
-        # the self-check resumes the wake-up's session, and its total_cost_usd is that session's running total
-        "cost_usd": round(sum(max(w.get("total_cost_usd") or 0, (w.get("check") or {}).get("total_cost_usd") or 0)
+        # claude: the self-check resumes the wake-up's session, and its total_cost_usd is that session's running total;
+        # pi: the self-check reports only its own cost
+        "cost_usd": round(sum((max if sl.get("harness") == "claude" else (lambda a, b: a + b))(
+                                  w.get("total_cost_usd") or 0, (w.get("check") or {}).get("total_cost_usd") or 0)
                               for w in wakes), 2),
         "tool_calls": len(mine), "tool_errors": len(errs),
         "tool_error_rate": round(100.0 * len(errs) / len(mine), 1) if mine else None,

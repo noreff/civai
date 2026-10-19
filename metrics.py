@@ -54,8 +54,10 @@ def per_seat(game, s, names, truth_last):
         "input_tokens": sum(u.get("input_tokens", 0) for u in usage),
         "output_tokens": sum(u.get("output_tokens", 0) for u in usage),
         "reasoning_tokens": sum(u.get("reasoning_output_tokens", 0) for u in usage),
-        # the self-check resumes the wake-up's session, and its total includes the wake-up's own cost
-        "cost_usd": round(sum(max(w.get("total_cost_usd") or 0, (w.get("check") or {}).get("total_cost_usd") or 0)
+        # claude: the self-check resumes the wake-up's session, and its total includes the wake-up's own cost;
+        # pi: the self-check reports only its own cost
+        "cost_usd": round(sum((max if s.get("harness") == "claude" else (lambda a, b: a + b))(
+                                  w.get("total_cost_usd") or 0, (w.get("check") or {}).get("total_cost_usd") or 0)
                               for w in wakes), 2),
         "skipped_audiences": sum(1 for w in stats if w.get("skipped")),
         "passed_turns": sum(1 for w in stats if w.get("passed")),
